@@ -1,0 +1,26 @@
+version: '3.6'
+
+services:
+  themarr:
+    build: .
+    container_name: themarr
+    environment:
+      PLEX_URL: ${PLEX_URL}
+      PLEX_TOKEN: ${PLEX_TOKEN}
+      TV_SHOWS_PATH: /tv
+      PLEX_LIBRARY_NAME: ${PLEX_LIBRARY_NAME:-TV Shows}
+      VERBOSE: ${VERBOSE:-false}
+      VERBOSE_MATCHING: ${VERBOSE_MATCHING:-false}
+      OVERWRITE: ${OVERWRITE:-false}
+    volumes:
+      - tv-shows:/tv
+    restart: "no"
+
+volumes:
+  tv-shows:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: ${NFS_MOUNT_OPTIONS:-addr=10.0.0.0,vers=4,soft,timeo=180,retrans=2,noresvport}
+      device: "${NFS_DEVICE}:/path/to/tvshows"
+      # NOTE: Update NFS_MOUNT_OPTIONS and NFS_DEVICE in your .env file
