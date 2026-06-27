@@ -232,17 +232,23 @@
 
   <!-- YouTube modal -->
   <div id="modal-youtube" class="modal-overlay hidden" onclick="closeModal('modal-youtube', event)">
-    <div class="modal">
+    <div class="modal modal-lg">
       <div class="modal-header">
         <h3>Download from YouTube</h3>
         <button class="modal-close" onclick="closeModal('modal-youtube')">&times;</button>
       </div>
       <div class="modal-body">
-        <p>Enter a YouTube URL to download the audio and save it as the theme for <strong id="youtube-item-title"></strong>.</p>
-        <div class="form-group">
-          <label for="youtube-url-input">YouTube URL</label>
-          <input type="url" id="youtube-url-input" class="form-control" placeholder="https://www.youtube.com/watch?v=...">
+        <p>Select a result below to download as the theme for <strong id="youtube-item-title"></strong>.</p>
+
+        <!-- Search bar -->
+        <div class="yt-search-bar">
+          <input type="text" id="youtube-search-input" class="form-control" placeholder="Search YouTube…">
+          <button class="btn btn-secondary btn-sm" onclick="doYoutubeSearch()">🔍 Search</button>
         </div>
+
+        <!-- Search results -->
+        <div id="youtube-search-results" class="yt-search-results"></div>
+
         <div id="modal-youtube-overwrite" class="overwrite-warning hidden">
           <div class="warning-box">
             <span>⚠️</span>
@@ -253,6 +259,13 @@
             Overwrite existing theme
           </label>
         </div>
+
+        <!-- Manual URL fallback -->
+        <div class="form-group">
+          <label for="youtube-url-input">Or paste a YouTube URL directly</label>
+          <input type="url" id="youtube-url-input" class="form-control" placeholder="https://www.youtube.com/watch?v=...">
+        </div>
+
         <div id="youtube-progress" class="progress-area hidden">
           <div class="spinner"></div>
           <span>Downloading and converting audio…</span>

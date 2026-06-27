@@ -580,6 +580,56 @@ def upload_theme(rating_key):
         return error_response(f'Failed to upload theme for {rating_key}', exc=exc)
 
 
+@app.route('/api/youtube/search', methods=['GET'])
+def youtube_search():
+    """Search YouTube and return up to *limit* results for a query string."""
+    query = (request.args.get('q') or '').strip()
+    if not query:
+        return jsonify({'error': 'Search query is required'}), 400
+
+    try:
+        limit = min(int(request.args.get('limit', 5)), 10)
+    except (TypeError, ValueError):
+        limit = 5
+
+    try:
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+            'skip_download': True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f'ytsearch{limit}:{query}', download=False)
+
+        results = []
+        for entry in (info.get('entries') or []):
+            video_id = entry.get('id')
+            if not video_id:
+                continue
+            thumbnails = entry.get('thumbnails') or []
+            thumbnail = thumbnails[0]['url'] if thumbnails else None
+            raw_duration = entry.get('duration')
+            if raw_duration:
+                mins, secs = divmod(int(raw_duration), 60)
+                duration_str = f'{mins}:{secs:02d}'
+            else:
+                duration_str = None
+            results.append({
+                'id': video_id,
+                'title': entry.get('title'),
+                'url': entry.get('url') or f'https://www.youtube.com/watch?v={video_id}',
+                'channel': entry.get('channel') or entry.get('uploader'),
+                'duration': duration_str,
+                'thumbnail': thumbnail,
+                'view_count': entry.get('view_count'),
+            })
+
+        return jsonify({'results': results})
+    except Exception as exc:
+        return error_response('YouTube search failed', exc=exc)
+
+
 @app.route('/api/items/<int:rating_key>/theme/youtube', methods=['POST'])
 def download_from_youtube(rating_key):
     """Download audio from a YouTube URL and save it as theme.mp3."""
