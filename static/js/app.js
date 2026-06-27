@@ -603,9 +603,11 @@ async function bulkDownload() {
   if (itemsWithTheme.length > 0) {
     const total = ratingKeys.length;
     const count = itemsWithTheme.length;
+    const selectionLabel = count !== 1 ? 'items' : 'item';
+    const verb = count !== 1 ? 'have' : 'has';
     const msg = count === total
-      ? `All ${count} selected item${count !== 1 ? 's' : ''} already ${count !== 1 ? 'have' : 'has'} a theme. Do you want to overwrite or skip them?`
-      : `${count} of the ${total} selected items already ${count !== 1 ? 'have' : 'has'} a theme. Do you want to overwrite or skip them?`;
+      ? `All ${count} selected ${selectionLabel} already ${verb} a theme. Do you want to overwrite or skip them?`
+      : `${count} of the ${total} selected items already ${verb} a theme. Do you want to overwrite or skip them?`;
     document.getElementById('modal-bulk-overwrite-message').textContent = msg;
     openModal('modal-bulk-overwrite');
     return;
