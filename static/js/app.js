@@ -591,12 +591,38 @@ function deselectAll() {
   updateBulkBar();
 }
 
-async function bulkDownload(overwrite) {
+async function bulkDownload() {
   if (selectedItems.size === 0) return;
   const ratingKeys = Array.from(selectedItems);
-  const btn = overwrite
-    ? document.querySelectorAll('#bulk-bar .btn')[1]
-    : document.querySelectorAll('#bulk-bar .btn')[0];
+
+  // Check how many selected items already have a local theme
+  const itemsWithTheme = currentItems.filter(
+    (item) => selectedItems.has(item.ratingKey) && item.has_local_theme
+  );
+
+  if (itemsWithTheme.length > 0) {
+    const total = ratingKeys.length;
+    const count = itemsWithTheme.length;
+    const msg = count === total
+      ? `All ${count} selected item${count !== 1 ? 's' : ''} already ${count !== 1 ? 'have' : 'has'} a theme. Do you want to overwrite or skip them?`
+      : `${count} of the ${total} selected items already ${count !== 1 ? 'have' : 'has'} a theme. Do you want to overwrite or skip them?`;
+    document.getElementById('modal-bulk-overwrite-message').textContent = msg;
+    openModal('modal-bulk-overwrite');
+    return;
+  }
+
+  await executeBulkDownload(false);
+}
+
+async function confirmBulkDownload(overwrite) {
+  closeModal('modal-bulk-overwrite');
+  await executeBulkDownload(overwrite);
+}
+
+async function executeBulkDownload(overwrite) {
+  if (selectedItems.size === 0) return;
+  const ratingKeys = Array.from(selectedItems);
+  const btn = document.getElementById('btn-bulk-download');
   const origText = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Downloading…';
@@ -684,7 +710,9 @@ async function confirmDownload() {
     } else if (data.success) {
       showToast('success', 'Theme downloaded successfully!');
       closeModal('modal-download');
-      await refreshItem(activeItemKey);
+      if (!applyServerItemUpdate(data.item)) {
+        await refreshItem(activeItemKey);
+      }
     } else {
       showToast('error', data.error || 'Download failed');
     }
@@ -748,7 +776,9 @@ async function confirmUpload() {
     } else if (data.success) {
       showToast('success', 'Theme uploaded successfully!');
       closeModal('modal-upload');
-      await refreshItem(activeItemKey);
+      if (!applyServerItemUpdate(data.item)) {
+        await refreshItem(activeItemKey);
+      }
     } else {
       showToast('error', data.error || 'Upload failed');
     }
@@ -941,7 +971,9 @@ async function confirmYoutube() {
     } else if (data.success) {
       showToast('success', 'YouTube theme downloaded successfully!');
       closeModal('modal-youtube');
-      await refreshItem(activeItemKey);
+      if (!applyServerItemUpdate(data.item)) {
+        await refreshItem(activeItemKey);
+      }
     } else {
       showToast('error', data.error || 'YouTube download failed');
     }
@@ -967,7 +999,9 @@ async function confirmDelete() {
     if (data.success) {
       showToast('success', 'Theme deleted.');
       closeModal('modal-delete');
-      await refreshItem(activeItemKey);
+      if (!applyServerItemUpdate(data.item)) {
+        await refreshItem(activeItemKey);
+      }
     } else {
       showToast('error', data.error || 'Delete failed');
     }
@@ -979,6 +1013,30 @@ async function confirmDelete() {
 // ============================================================
 // Refresh single item card
 // ============================================================
+function applyServerItemUpdate(updatedItem) {
+  if (!updatedItem || !currentLibraryId || !Array.isArray(currentItems)) return false;
+
+  const itemIndex = currentItems.findIndex((item) => String(item.ratingKey) === String(updatedItem.ratingKey));
+  if (itemIndex === -1) return false;
+
+  const nextItems = [...currentItems];
+  nextItems[itemIndex] = updatedItem;
+  currentItems = nextItems;
+  libraryCache.set(currentLibraryId, nextItems);
+
+  if (!updatedItem.has_local_theme
+      && activeAudio
+      && activeAudio.src
+      && activeAudio.src.includes(`/api/items/${updatedItem.ratingKey}/theme`)) {
+    stopInlineAudio();
+  }
+
+  renderItems(nextItems);
+  updateStats(nextItems);
+  updateBulkBar();
+  return true;
+}
+
 async function refreshItem(ratingKey) {
   if (!currentLibraryId) return;
   try {
