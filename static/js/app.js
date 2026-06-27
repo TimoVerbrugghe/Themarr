@@ -683,7 +683,9 @@ async function confirmDownload() {
     } else if (data.success) {
       showToast('success', 'Theme downloaded successfully!');
       closeModal('modal-download');
-      await refreshItem(activeItemKey);
+      if (!applyServerItemUpdate(data.item)) {
+        await refreshItem(activeItemKey);
+      }
     } else {
       showToast('error', data.error || 'Download failed');
     }
@@ -746,7 +748,9 @@ async function confirmUpload() {
     } else if (data.success) {
       showToast('success', 'Theme uploaded successfully!');
       closeModal('modal-upload');
-      await refreshItem(activeItemKey);
+      if (!applyServerItemUpdate(data.item)) {
+        await refreshItem(activeItemKey);
+      }
     } else {
       showToast('error', data.error || 'Upload failed');
     }
@@ -793,7 +797,9 @@ async function confirmYoutube() {
     } else if (data.success) {
       showToast('success', 'YouTube theme downloaded successfully!');
       closeModal('modal-youtube');
-      await refreshItem(activeItemKey);
+      if (!applyServerItemUpdate(data.item)) {
+        await refreshItem(activeItemKey);
+      }
     } else {
       showToast('error', data.error || 'YouTube download failed');
     }
@@ -819,7 +825,9 @@ async function confirmDelete() {
     if (data.success) {
       showToast('success', 'Theme deleted.');
       closeModal('modal-delete');
-      await refreshItem(activeItemKey);
+      if (!applyServerItemUpdate(data.item)) {
+        await refreshItem(activeItemKey);
+      }
     } else {
       showToast('error', data.error || 'Delete failed');
     }
@@ -831,6 +839,30 @@ async function confirmDelete() {
 // ============================================================
 // Refresh single item card
 // ============================================================
+function applyServerItemUpdate(updatedItem) {
+  if (!updatedItem || !currentLibraryId || !Array.isArray(currentItems)) return false;
+
+  const itemIndex = currentItems.findIndex((item) => String(item.ratingKey) === String(updatedItem.ratingKey));
+  if (itemIndex === -1) return false;
+
+  const nextItems = [...currentItems];
+  nextItems[itemIndex] = updatedItem;
+  currentItems = nextItems;
+  libraryCache.set(currentLibraryId, nextItems);
+
+  if (!updatedItem.has_local_theme
+      && activeAudio
+      && activeAudio.src
+      && activeAudio.src.includes(`/api/items/${updatedItem.ratingKey}/theme`)) {
+    stopInlineAudio();
+  }
+
+  renderItems(nextItems);
+  updateStats(nextItems);
+  updateBulkBar();
+  return true;
+}
+
 async function refreshItem(ratingKey) {
   if (!currentLibraryId) return;
   try {

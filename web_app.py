@@ -348,6 +348,20 @@ def _invalidate_library_cache():
         _library_cache.clear()
 
 
+def _sync_cached_item(item):
+    """Update an item's cached entry in-place after local theme state changes."""
+    updated_item = item_to_dict(item)
+    updated = False
+    with _library_cache_lock:
+        for section_items in _library_cache.values():
+            for index, cached_item in enumerate(section_items):
+                if str(cached_item.get('ratingKey')) == str(item.ratingKey):
+                    section_items[index] = updated_item
+                    updated = True
+                    break
+    return updated_item, updated
+
+
 def _kick_off_cache_warmup():
     """Invalidate the cache and rebuild all sections in a background thread."""
     _invalidate_library_cache()
@@ -537,8 +551,8 @@ def download_theme_from_plex(rating_key):
 
         logger.info('Downloaded theme for %s to %s', item.title, theme_path)
         send_pushover_notification('Theme Downloaded', f'{item.title} theme downloaded from Plex')
-        _invalidate_library_cache()
-        return jsonify({'success': True, 'path': str(theme_path)})
+        item_dict, _ = _sync_cached_item(item)
+        return jsonify({'success': True, 'path': str(theme_path), 'item': item_dict})
     except Exception as exc:
         return error_response(f'Failed to download theme from Plex for {rating_key}', exc=exc)
 
@@ -574,8 +588,8 @@ def upload_theme(rating_key):
 
         logger.info('Uploaded theme for %s to %s', item.title, theme_path)
         send_pushover_notification('Theme Uploaded', f'{item.title} theme uploaded')
-        _invalidate_library_cache()
-        return jsonify({'success': True, 'path': str(theme_path)})
+        item_dict, _ = _sync_cached_item(item)
+        return jsonify({'success': True, 'path': str(theme_path), 'item': item_dict})
     except Exception as exc:
         return error_response(f'Failed to upload theme for {rating_key}', exc=exc)
 
@@ -633,8 +647,8 @@ def download_from_youtube(rating_key):
 
         logger.info('Downloaded YouTube theme for %s to %s', item.title, theme_path)
         send_pushover_notification('Theme Downloaded', f'{item.title} theme downloaded from YouTube')
-        _invalidate_library_cache()
-        return jsonify({'success': True, 'path': str(theme_path)})
+        item_dict, _ = _sync_cached_item(item)
+        return jsonify({'success': True, 'path': str(theme_path), 'item': item_dict})
     except Exception as exc:
         return error_response(f'Failed YouTube download for {rating_key}', exc=exc)
 
@@ -653,8 +667,8 @@ def delete_theme(rating_key):
             return jsonify({'error': 'No theme file to delete'}), 404
         theme_path.unlink()
         logger.info('Deleted theme for %s', item.title)
-        _invalidate_library_cache()
-        return jsonify({'success': True})
+        item_dict, _ = _sync_cached_item(item)
+        return jsonify({'success': True, 'item': item_dict})
     except Exception as exc:
         return error_response(f'Failed to delete theme for {rating_key}', exc=exc)
 
@@ -719,6 +733,7 @@ def bulk_download_themes():
                         fh.write(chunk)
 
             results['success'].append({'ratingKey': rating_key, 'title': item.title})
+            _sync_cached_item(item)
             logger.info('Bulk: downloaded theme for %s', item.title)
 
         except Exception as exc:
@@ -732,7 +747,6 @@ def bulk_download_themes():
             title=f"Themes Downloaded ({len(results['success'])})",
             message=msg,
         )
-        _invalidate_library_cache()
 
     return jsonify(results)
 

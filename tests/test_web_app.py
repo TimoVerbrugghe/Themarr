@@ -234,6 +234,34 @@ class TestThemeDownload:
         data = resp.get_json()
         assert data['success'] is True
 
+    def test_download_theme_updates_cached_item_state(self, client, mock_plex, tmp_path):
+        import web_app
+
+        show_dir = tmp_path / 'Test Show (2020)'
+        show_dir.mkdir()
+        show = make_mock_show(location=str(show_dir))
+        mock_plex.fetchItem.return_value = show
+        mock_plex.url.return_value = 'http://plex/theme.mp3'
+
+        mock_response = MagicMock()
+        mock_response.iter_content.return_value = [b'fake_mp3_data']
+        mock_plex._session.get.return_value = mock_response
+
+        web_app._library_cache[1] = [{
+            'ratingKey': 1,
+            'title': 'Test Show',
+            'has_local_theme': False,
+            'has_plex_theme': True,
+        }]
+
+        resp = client.post('/api/items/1/theme/download',
+                           json={'overwrite': False},
+                           content_type='application/json')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['item']['has_local_theme'] is True
+        assert web_app._library_cache[1][0]['has_local_theme'] is True
+
     def test_download_theme_no_plex_theme(self, client, mock_plex, tmp_path):
         show = make_mock_show(has_theme=False)
         mock_plex.fetchItem.return_value = show
@@ -481,6 +509,32 @@ class TestBulkDownload:
                            json={'ratingKeys': [1], 'overwrite': True})
         data = resp.get_json()
         assert len(data['success']) == 1
+
+    def test_bulk_download_updates_cached_item_state(self, client, mock_plex, tmp_path):
+        import web_app
+
+        show_dir = tmp_path / 'Test Show (2020)'
+        show_dir.mkdir()
+        show = make_mock_show(location=str(show_dir))
+        mock_plex.fetchItem.return_value = show
+        mock_plex.url.return_value = 'http://plex/theme.mp3'
+        mock_resp = MagicMock()
+        mock_resp.iter_content.return_value = [b'new_audio']
+        mock_plex._session.get.return_value = mock_resp
+
+        web_app._library_cache[1] = [{
+            'ratingKey': 1,
+            'title': 'Test Show',
+            'has_local_theme': False,
+            'has_plex_theme': True,
+        }]
+
+        resp = client.post('/api/bulk/theme/download',
+                           json={'ratingKeys': [1], 'overwrite': False})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data['success']) == 1
+        assert web_app._library_cache[1][0]['has_local_theme'] is True
 
 
 # ============================================================
