@@ -6,9 +6,13 @@ FROM python:3.14-slim
 RUN apt-get update && apt-get install -y --no-install-recommends curl && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends ffmpeg nodejs && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    rm -rf /var/cache/apt/*
 
 WORKDIR /app
+
+# Create non-root user for running the application
+RUN groupadd -r themarr && useradd -r -g themarr themarr
 
 # Install Python dependencies
 COPY requirements.txt .
@@ -19,8 +23,14 @@ COPY web_app.py .
 COPY templates/ templates/
 COPY static/ static/
 
+# Fix permissions for the non-root user
+RUN chown -R themarr:themarr /app
+
 # Expose Web UI port
 EXPOSE 8080
+
+# Switch to non-root user
+USER themarr
 
 # Default: run the Web UI
 CMD ["python", "web_app.py"]

@@ -2,6 +2,22 @@ services:
   themarr:
     build: .
     container_name: themarr
+    # Security hardening
+    security_opt:
+      - no-new-privileges=true
+    cap_drop:
+      - ALL
+    read_only: true
+    tty: false
+    stdin_open: false
+    # Resource limits
+    pids_limit: 512
+    mem_limit: 1g
+    cpus: 1.00
+    # tmpfs for runtime directories (writable while root fs is read-only)
+    tmpfs:
+      - /run:rw,exec,nosuid,nodev,size=64m
+      - /tmp:rw,noexec,nosuid,nodev,size=512m
     environment:
       PLEX_URL: ${PLEX_URL}
       PLEX_TOKEN: ${PLEX_TOKEN}
@@ -14,3 +30,10 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
