@@ -10,13 +10,49 @@ let activeItemKey = null;
 let currentView = 'grid';
 const selectedItems = new Set();  // ratingKeys of currently selected items
 
+// Audio state (list-view inline preview)
+let activeAudio = null;   // HTMLAudioElement currently playing
+let activePlayBtn = null; // button element that triggered playback
+
 // ============================================================
 // Init
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
   checkPlexStatus();
   loadLibraries();
 });
+
+// ============================================================
+// Theme
+// ============================================================
+function initTheme() {
+  // Priority: localStorage > server default (already set on <html>)
+  const saved = localStorage.getItem('themarr-theme');
+  if (saved === 'light' || saved === 'dark') {
+    applyTheme(saved);
+  } else {
+    // Use whatever the server rendered (data-theme attribute)
+    const current = document.documentElement.dataset.theme || 'dark';
+    applyTheme(current);
+  }
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const btn = document.getElementById('theme-toggle');
+  if (btn) {
+    btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    btn.title = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+  }
+}
+
+function toggleTheme() {
+  const current = document.documentElement.dataset.theme || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('themarr-theme', next);
+  applyTheme(next);
+}
 
 // ============================================================
 // Plex Status
@@ -96,6 +132,9 @@ async function selectLibrary(id, title) {
   // Clear selection when switching libraries
   selectedItems.clear();
   updateBulkBar();
+
+  // Stop any playing audio
+  stopInlineAudio();
 
   try {
     const items = await apiGet(`/api/libraries/${id}/items`);
@@ -202,18 +241,19 @@ function createItemCard(item) {
   const actions = document.createElement('div');
   actions.className = 'item-actions';
 
+  // Button order: Download from Plex → YouTube → Upload → Delete
   const downloadButton = createActionButton('action-btn action-btn-download', 'Download from Plex', '↓ Download from Plex');
   downloadButton.disabled = !item.has_plex_theme;
   downloadButton.addEventListener('click', () => openDownloadModal(item.ratingKey, item.title, item.has_local_theme, item.has_plex_theme));
   actions.appendChild(downloadButton);
 
-  const uploadButton = createActionButton('action-btn action-btn-upload', 'Upload custom theme', '↑ Upload Custom Theme');
-  uploadButton.addEventListener('click', () => openUploadModal(item.ratingKey, item.title, item.has_local_theme));
-  actions.appendChild(uploadButton);
-
   const youtubeButton = createActionButton('action-btn action-btn-youtube', 'Download from YouTube', '▶ Download from YouTube');
   youtubeButton.addEventListener('click', () => openYoutubeModal(item.ratingKey, item.title, item.has_local_theme));
   actions.appendChild(youtubeButton);
+
+  const uploadButton = createActionButton('action-btn action-btn-upload', 'Upload custom theme', '↑ Upload Custom Theme');
+  uploadButton.addEventListener('click', () => openUploadModal(item.ratingKey, item.title, item.has_local_theme));
+  actions.appendChild(uploadButton);
 
   const deleteButton = createActionButton('action-btn action-btn-delete', 'Delete theme', '🗑 Delete Theme');
   deleteButton.disabled = !item.has_local_theme;
@@ -279,23 +319,35 @@ function createItemRow(item) {
   info.appendChild(yearEl);
   row.appendChild(info);
 
+  // Inline play/pause button (only when a local theme exists)
+  if (item.has_local_theme) {
+    const playBtn = document.createElement('button');
+    playBtn.className = 'action-btn-play-inline';
+    playBtn.type = 'button';
+    playBtn.title = 'Preview theme';
+    playBtn.textContent = '▶';
+    playBtn.addEventListener('click', () => toggleInlineAudio(item.ratingKey, playBtn));
+    row.appendChild(playBtn);
+  }
+
   const actions = document.createElement('div');
   actions.className = 'item-actions item-actions-row';
 
-  const downloadButton = createActionButton('action-btn action-btn-download', 'Download from Plex', '↓ Download from Plex');
+  // Button order: Download from Plex → YouTube → Upload → Delete
+  const downloadButton = createActionButton('action-btn action-btn-download', 'Download from Plex', '↓ Plex');
   downloadButton.disabled = !item.has_plex_theme;
   downloadButton.addEventListener('click', () => openDownloadModal(item.ratingKey, item.title, item.has_local_theme, item.has_plex_theme));
   actions.appendChild(downloadButton);
 
-  const uploadButton = createActionButton('action-btn action-btn-upload', 'Upload custom theme', '↑ Upload Custom Theme');
-  uploadButton.addEventListener('click', () => openUploadModal(item.ratingKey, item.title, item.has_local_theme));
-  actions.appendChild(uploadButton);
-
-  const youtubeButton = createActionButton('action-btn action-btn-youtube', 'Download from YouTube', '▶ Download from YouTube');
+  const youtubeButton = createActionButton('action-btn action-btn-youtube', 'Download from YouTube', '▶ YouTube');
   youtubeButton.addEventListener('click', () => openYoutubeModal(item.ratingKey, item.title, item.has_local_theme));
   actions.appendChild(youtubeButton);
 
-  const deleteButton = createActionButton('action-btn action-btn-delete', 'Delete theme', '🗑 Delete Theme');
+  const uploadButton = createActionButton('action-btn action-btn-upload', 'Upload custom theme', '↑ Upload');
+  uploadButton.addEventListener('click', () => openUploadModal(item.ratingKey, item.title, item.has_local_theme));
+  actions.appendChild(uploadButton);
+
+  const deleteButton = createActionButton('action-btn action-btn-delete', 'Delete theme', '🗑');
   deleteButton.disabled = !item.has_local_theme;
   deleteButton.addEventListener('click', () => openDeleteModal(item.ratingKey, item.title));
   actions.appendChild(deleteButton);
@@ -305,12 +357,74 @@ function createItemRow(item) {
 }
 
 // ============================================================
+// Inline audio preview (list view)
+// ============================================================
+function toggleInlineAudio(ratingKey, btn) {
+  const src = `/api/items/${ratingKey}/theme`;
+
+  // If this button is already the active one, toggle play/pause
+  if (activePlayBtn === btn) {
+    if (activeAudio && !activeAudio.paused) {
+      activeAudio.pause();
+      btn.textContent = '▶';
+      btn.classList.remove('playing');
+    } else if (activeAudio) {
+      activeAudio.play().catch(() => {});
+      btn.textContent = '⏸';
+      btn.classList.add('playing');
+    }
+    return;
+  }
+
+  // Stop whatever is currently playing
+  stopInlineAudio();
+
+  // Create and play a new audio element
+  const audio = new Audio(src);
+  audio.addEventListener('ended', () => {
+    btn.textContent = '▶';
+    btn.classList.remove('playing');
+    activeAudio = null;
+    activePlayBtn = null;
+  });
+  audio.addEventListener('pause', () => {
+    // Sync button state whenever audio pauses (e.g. navigation)
+    if (activePlayBtn === btn) {
+      btn.textContent = '▶';
+      btn.classList.remove('playing');
+    }
+  });
+  audio.play().catch(() => {
+    btn.textContent = '▶';
+    btn.classList.remove('playing');
+  });
+
+  btn.textContent = '⏸';
+  btn.classList.add('playing');
+  activeAudio = audio;
+  activePlayBtn = btn;
+}
+
+function stopInlineAudio() {
+  if (activeAudio) {
+    activeAudio.pause();
+    activeAudio = null;
+  }
+  if (activePlayBtn) {
+    activePlayBtn.textContent = '▶';
+    activePlayBtn.classList.remove('playing');
+    activePlayBtn = null;
+  }
+}
+
+// ============================================================
 // View toggle
 // ============================================================
 function setView(mode) {
   currentView = mode;
   document.getElementById('view-btn-grid').classList.toggle('active', mode === 'grid');
   document.getElementById('view-btn-list').classList.toggle('active', mode === 'list');
+  stopInlineAudio();
   renderItems(currentItems);
 }
 
@@ -645,6 +759,10 @@ async function refreshItem(ratingKey) {
     if (updated) {
       const card = document.getElementById(`card-${ratingKey}`);
       if (card) {
+        // Stop inline audio if it belongs to this card
+        if (activePlayBtn && card.contains(activePlayBtn)) {
+          stopInlineAudio();
+        }
         card.replaceWith(createItem(updated));
       }
     }

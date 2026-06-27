@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="{{ default_theme }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,6 +15,7 @@
         <span class="logo-text">Themarr</span>
       </a>
       <div class="header-right">
+        <button id="theme-toggle" class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle theme"></button>
         <div id="plex-status" class="plex-status plex-status--unknown">
           <span class="status-dot"></span>
           <span id="plex-status-text">Connecting…</span>

@@ -287,8 +287,16 @@ def item_to_dict(item):
 
 @app.route('/')
 def index():
-    """Serve the main Web UI."""
-    return render_template('index.html')
+    """Serve the main Web UI.
+
+    Reads DEFAULT_THEME from the environment (``dark`` or ``light``) to set
+    the initial colour scheme rendered into the page.  The user can override
+    this in-browser; their choice is persisted in localStorage.
+    """
+    default_theme = os.getenv('DEFAULT_THEME', 'dark').strip().lower()
+    if default_theme not in ('dark', 'light'):
+        default_theme = 'dark'
+    return render_template('index.html', default_theme=default_theme)
 
 
 @app.route('/api/status')

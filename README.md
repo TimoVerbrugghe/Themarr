@@ -4,11 +4,13 @@ Themarr manages Plex theme music for TV shows and movies. It includes a Flask-ba
 
 ## Screenshots
 
+### Dark theme
+
 | Welcome | Poster view (grid) |
 |---|---|
 | ![Welcome screen](screenshots/01_welcome.png) | ![TV Shows poster view](screenshots/02_tv_library_poster.png) |
 
-| List view | Filter: No Theme (list) |
+| List view (with inline play/pause) | Filter: No Theme (list) |
 |---|---|
 | ![TV Shows list view](screenshots/03_tv_library_list.png) | ![Filter no theme](screenshots/04_filter_no_theme_list.png) |
 
@@ -16,11 +18,21 @@ Themarr manages Plex theme music for TV shows and movies. It includes a Flask-ba
 |---|---|
 | ![Bulk select poster view](screenshots/05_bulk_select_poster.png) | ![Bulk select list view](screenshots/07_bulk_select_list.png) |
 
+### Light theme
+
+| Welcome | Poster view (grid) |
+|---|---|
+| ![Welcome screen light](screenshots/08_welcome_light.png) | ![TV Shows poster view light](screenshots/09_tv_library_poster_light.png) |
+
+| List view |
+|---|
+| ![TV Shows list view light](screenshots/10_tv_library_list_light.png) |
+
 ## Features
 
-- **Web UI** — Sonarr/Radarr-inspired dark theme, poster thumbnails, in-browser audio playback; toggle between **poster (grid)** and **compact list** views
+- **Web UI** — dark/light theme with in-header toggle (default theme configurable via `DEFAULT_THEME`), poster thumbnails, in-browser audio playback; toggle between **poster (grid)** and **compact list** views; list view includes inline play/pause preview per item
 - **Multi-select** — select any number of items and bulk-download their themes in one click
-- **Per-item actions** — download from Plex (with preview), upload custom MP3, download from YouTube via `yt-dlp`, delete
+- **Per-item actions** — download from Plex (with preview), download from YouTube via `yt-dlp`, upload custom MP3, delete
 - **Sonarr/Radarr webhooks** — auto-download themes when a new series or movie is added; staggered retry loop until Plex picks up the new item
 - **Pushover notifications** — push notification on every theme download (optional)
 - **CLI batch downloader** — process whole TV / movie libraries non-interactively
@@ -64,6 +76,7 @@ docker pull ghcr.io/timoverbrugghe/themarr:latest
 | `MOVIES_PATH` | — | `/movies` | Container path for movies |
 | `WEB_PORT` | — | `8080` | Published web port |
 | `FLASK_DEBUG` | — | `false` | Enable Flask debug mode |
+| `DEFAULT_THEME` | — | `dark` | Default UI theme: `dark` or `light` (user can override in-browser) |
 | `VERBOSE` | — | `false` | Verbose CLI logging |
 | `VERBOSE_MATCHING` | — | `false` | Verbose match logging in CLI |
 | `OVERWRITE` | — | `false` | Re-download even if `theme.mp3` already exists |
