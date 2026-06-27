@@ -6,8 +6,9 @@ This repository is prepared for AI coding agents. Use this guide for safe, consi
 
 - **Language**: Python 3.11
 - **Runtime**: Docker / Docker Compose
-- **Entry point**: `plex_theme_downloader.py`
-- **Goal**: Sync Plex TV show theme files (`theme.mp3`) into local show folders
+- **Web UI entry point**: `web_app.py` (Flask, port 8080)
+- **CLI entry point**: `plex_theme_downloader.py`
+- **Goal**: Manage Plex theme music (`theme.mp3`) for TV shows and movies via Web UI or batch CLI
 
 ## Setup and Validation Commands
 
@@ -16,9 +17,13 @@ Run from repo root:
 ```bash
 # Syntax check
 python3 -m py_compile plex_theme_downloader.py
+python3 -m py_compile web_app.py
 
 # Validate compose file
 docker compose config
+
+# Run tests (78 tests, must all pass)
+python3 -m pytest tests/ -v
 
 # Build container image
 docker build -t themarr:test .
@@ -28,15 +33,32 @@ docker build -t themarr:test .
 
 Primary environment variables are defined in `.env.example`:
 
-- `PLEX_URL`
-- `PLEX_TOKEN`
-- `PLEX_LIBRARY_NAME`
-- `TV_SHOWS_PATH`
-- `NFS_MOUNT_OPTIONS`
-- `NFS_DEVICE`
-- `VERBOSE`
-- `VERBOSE_MATCHING`
-- `OVERWRITE`
+- `PLEX_URL`, `PLEX_TOKEN` — Plex server credentials
+- `TV_SHOWS_HOST_PATH`, `MOVIES_HOST_PATH` — host paths mounted into container
+- `TV_SHOWS_PATH` / `TV_PATH` — container path for TV shows (default `/tv`)
+- `MOVIES_PATH` — container path for movies (default `/movies`)
+- `WEB_PORT` — web UI port (default `8080`)
+- `FLASK_DEBUG` — Flask debug mode
+- `DEFAULT_THEME` — default UI theme: `dark` or `light`
+- `VERBOSE`, `VERBOSE_MATCHING`, `OVERWRITE` — CLI flags
+- `PUSHOVER_APP_TOKEN`, `PUSHOVER_USER_KEY` — optional Pushover notifications
+- `WEBHOOK_USERNAME`, `WEBHOOK_PASSWORD` — optional webhook Basic Auth
+- `PLEX_RETRY_ATTEMPTS`, `PLEX_RETRY_DELAY` — webhook retry tuning
+
+## Key Files
+
+| File | Purpose |
+|---|---|
+| `web_app.py` | Flask REST API + Web UI backend |
+| `plex_theme_downloader.py` | CLI batch downloader (TV + movies) |
+| `templates/index.html` | Single-page web UI shell |
+| `static/css/style.css` | Sonarr-inspired dark/light theme CSS |
+| `static/js/app.js` | Frontend JS (library browser, modals, multi-select, settings) |
+| `tests/test_web_app.py` | Web app unit tests |
+| `tests/test_plex_theme_downloader.py` | CLI unit tests |
+| `scripts/take_screenshots.py` | Playwright screenshot helper (mocks Plex API) |
+| `.github/workflows/docker-publish.yml` | CI: build + push to ghcr.io on main push |
+| `.github/workflows/screenshots.yml` | CI: auto-update screenshots on UI-touching PRs |
 
 ## Editing Rules for Agents
 
@@ -45,4 +67,38 @@ Primary environment variables are defined in `.env.example`:
 - Preserve Docker-first workflow and existing environment variable names.
 - Update `README.md` when behavior, setup, or configuration changes.
 - Re-run validation commands after edits.
+
+## Screenshot Rule — MANDATORY for Web UI Changes
+
+**Whenever you modify `templates/index.html`, `static/css/style.css`, or
+`static/js/app.js`, you MUST regenerate the screenshots and commit them.**
+
+### Why
+
+The `screenshots/` directory in the README serves as the primary visual
+documentation of the UI.  Stale screenshots mislead users and reviewers.
+
+### How to regenerate locally
+
+```bash
+pip install playwright
+playwright install chromium
+python3 scripts/take_screenshots.py
+```
+
+No Plex server is needed — the script intercepts all `/api/*` calls with
+realistic mock data using Playwright's route-interception feature.
+
+### Automation
+
+`.github/workflows/screenshots.yml` runs automatically on any PR that touches
+UI files.  It takes screenshots and:
+
+- **Same-repo PRs** — commits updated screenshots directly to the PR branch.
+- **Fork PRs** — uploads screenshots as a downloadable workflow artifact
+  (write access is not available for forks).
+
+If the CI job runs after your code push, you may not need to run the script
+locally.  But if you are making multiple UI changes in one PR, run the script
+locally and commit the results rather than waiting for CI.
 

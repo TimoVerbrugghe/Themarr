@@ -1,288 +1,193 @@
 # Themarr
 
-A Docker-based utility that synchronizes TV show theme files from your Plex server to your local media library. Downloads and manages `theme.mp3` files for all shows that have themes available in Plex.
+Themarr manages Plex theme music for TV shows and movies. It includes a Flask-based web UI, a CLI batch downloader, Sonarr/Radarr webhook integration, and Pushover notifications.
+
+## Screenshots
+
+Screenshots are kept up-to-date automatically: any PR that touches
+`templates/`, `static/`, or `web_app.py` triggers the
+[screenshots workflow](.github/workflows/screenshots.yml), which uses
+Playwright + mocked Plex data to regenerate all images and commit them back
+to the branch.
+
+### Dark theme
+
+| Welcome | Poster view (grid) |
+|---|---|
+| ![Welcome screen](screenshots/01_welcome.png) | ![TV Shows poster view](screenshots/02_tv_library_poster.png) |
+
+| List view (with inline play/pause) | Filter: No Theme (list) |
+|---|---|
+| ![TV Shows list view](screenshots/03_tv_library_list.png) | ![Filter no theme](screenshots/04_filter_no_theme_list.png) |
+
+| Bulk select (poster) | Bulk select (list) |
+|---|---|
+| ![Bulk select poster view](screenshots/05_bulk_select_poster.png) | ![Bulk select list view](screenshots/07_bulk_select_list.png) |
+
+| Settings page |
+|---|
+| ![Settings page](screenshots/11_settings.png) |
+
+### Light theme
+
+| Welcome | Poster view (grid) |
+|---|---|
+| ![Welcome screen light](screenshots/08_welcome_light.png) | ![TV Shows poster view light](screenshots/09_tv_library_poster_light.png) |
+
+| List view |
+|---|
+| ![TV Shows list view light](screenshots/10_tv_library_list_light.png) |
 
 ## Features
 
-- 📻 **Automatic Theme Syncing**: Downloads themes directly from Plex for all TV shows
-- 🎯 **Smart Matching**: Case-insensitive folder matching using Plex metadata and direct API paths
-- 🔄 **Overwrite Mode**: Re-download and replace existing theme files to keep them current
-- 📊 **High Coverage**: 98.7% folder matching accuracy using `show.locations` API
-- 🐳 **Fully Containerized**: Docker & Docker Compose setup for easy deployment
-- 📡 **NFS Support**: Seamless integration with NFS-mounted media volumes
-- 🔍 **Detailed Logging**: Verbose output for troubleshooting and monitoring
+- **Web UI** — dark/light theme with in-header toggle (default theme configurable via `DEFAULT_THEME`), poster thumbnails, in-browser audio playback; toggle between **poster (grid)** and **compact list** views; list view includes inline play/pause preview per item
+- **Multi-select** — select any number of items and bulk-download their themes in one click
+- **Per-item actions** — download from Plex (with preview), download from YouTube via `yt-dlp`, upload custom MP3, delete
+- **Settings page** — quick-action buttons (test Plex, refresh libraries, test Pushover, rescan files) and a full environment variable reference table
+- **Sonarr/Radarr webhooks** — auto-download themes when a new series or movie is added; staggered retry loop until Plex picks up the new item
+- **Pushover notifications** — push notification on every theme download (optional)
+- **CLI batch downloader** — process whole TV / movie libraries non-interactively
+- **Docker-first** — multi-platform image (`linux/amd64`, `linux/arm64`) published to `ghcr.io`
 
-## How It Works
-
-1. **Connects to Plex**: Authenticates with your Plex server
-2. **Retrieves Show Data**: Fetches complete TV library metadata including theme URLs and filesystem locations
-3. **Scans Local Storage**: Reads local folder structure
-4. **Matches Shows**: Uses Plex's `show.locations[0]` API property for accurate path extraction
-5. **Downloads Themes**: Streams MP3 files directly from Plex (8KB chunks for efficiency)
-6. **Saves Files**: Creates/overwrites `theme.mp3` in matched show folders
-
-## Prerequisites
-
-- Docker and Docker Compose
-- Running Plex Media Server with TV library
-- Plex API token (see [Getting Your Plex Token](#getting-your-plex-token))
-- TV shows organized in local folder structure
-- Network access from Docker container to Plex server
-
-## Quick Start
-
-### 1. Clone Repository
-
-```bash
-git clone https://github.com/yourusername/themarr.git
-cd themarr
-```
-
-### 2. Configure Environment
+## Quick start
 
 ```bash
 cp .env.example .env
-# Edit .env with your Plex credentials
+# edit .env with your Plex URL, token, and media paths
+
+docker compose up --build
 ```
 
-### 3. Run
+Open `http://localhost:8080`.
+
+Or pull the pre-built image:
 
 ```bash
-# Download themes once
-docker-compose --env-file .env run --rm themarr
-
-# Or run continuously
-docker-compose --env-file .env up -d
+docker pull ghcr.io/timoverbrugghe/themarr:latest
 ```
 
-## AI Ready
+## Requirements
 
-This repo is configured for AI coding assistants:
-
-- `AGENTS.md` contains project-level agent guidance and validation commands.
-- `.github/copilot-instructions.md` provides GitHub Copilot-specific instructions.
-
-If you use an AI assistant to change code, validate with:
-
-```bash
-python3 -m py_compile plex_theme_downloader.py
-docker compose config
-docker build -t themarr:test .
-```
+- Docker / Docker Compose
+- Plex Media Server with a TV Shows and/or Movies library
+- Writable media folders mounted into the container
+- `ffmpeg` (included in the Docker image) for YouTube audio extraction
 
 ## Configuration
 
-### Environment Variables
+### Core
 
 | Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `PLEX_URL` | ✅ | - | Plex server URL (e.g., `http://192.168.1.100:32400`) |
-| `PLEX_TOKEN` | ✅ | - | Plex API authentication token |
-| `TV_SHOWS_PATH` | ✅ | `/tv` | Container path to TV shows directory |
-| `PLEX_LIBRARY_NAME` | ❌ | `TV Shows` | Name of Plex TV library |
-| `VERBOSE` | ❌ | `false` | Enable detailed debug logging |
-| `VERBOSE_MATCHING` | ❌ | `false` | Show detailed matching information |
-| `OVERWRITE` | ❌ | `false` | Re-download themes even if they exist |
+|---|---|---|---|
+| `PLEX_URL` | ✅ | — | Plex server URL, e.g. `http://192.168.1.100:32400` |
+| `PLEX_TOKEN` | ✅ | — | Plex API authentication token |
+| `TV_SHOWS_HOST_PATH` | ✅ | `/mnt/tv` | Host path for TV shows, mounted as `/tv` in container |
+| `MOVIES_HOST_PATH` | — | `/mnt/movies` | Host path for movies, mounted as `/movies` in container |
+| `TV_SHOWS_PATH` / `TV_PATH` | — | `/tv` | Container path for TV shows |
+| `MOVIES_PATH` | — | `/movies` | Container path for movies |
+| `WEB_PORT` | — | `8080` | Published web port |
+| `FLASK_DEBUG` | — | `false` | Enable Flask debug mode |
+| `DEFAULT_THEME` | — | `dark` | Default UI theme: `dark` or `light` (user can override in-browser) |
+| `VERBOSE` | — | `false` | Verbose CLI logging |
+| `VERBOSE_MATCHING` | — | `false` | Verbose match logging in CLI |
+| `OVERWRITE` | — | `false` | Re-download even if `theme.mp3` already exists |
 
-### .env.example
+### Pushover notifications
 
-```env
-PLEX_URL=http://plex.local.timo.be:32400
-PLEX_TOKEN=your_plex_token_here
-PLEX_LIBRARY_NAME=TV Shows
-TV_SHOWS_PATH=/tv
+Set both variables to enable push notifications on theme downloads.
 
-# Optional flags
-VERBOSE=false
-VERBOSE_MATCHING=false
-OVERWRITE=false
-```
+| Variable | Description |
+|---|---|
+| `PUSHOVER_APP_TOKEN` | Pushover application token |
+| `PUSHOVER_USER_KEY` | Pushover user or group key |
 
-### NFS Volume Configuration
+### Webhooks (Sonarr / Radarr)
 
-If using NFS mount, update `docker-compose.yml`:
+Point Sonarr's webhook connection to `POST http://<themarr>:8080/api/webhooks/sonarr` and Radarr's to `/api/webhooks/radarr`.
 
-```yaml
-volumes:
-  tv-shows:
-    driver: local
-    driver_opts:
-      type: nfs
-      o: addr=10.10.10.2,vers=4,soft,timeo=180,retrans=2,noresvport
-      device: ":/mnt/path/to/tvshows"
-```
+| Variable | Description |
+|---|---|
+| `WEBHOOK_USERNAME` | HTTP Basic Auth username (leave blank to disable auth) |
+| `WEBHOOK_PASSWORD` | HTTP Basic Auth password |
+| `PLEX_RETRY_ATTEMPTS` | Max Plex polling attempts after add event (default: `10`) |
+| `PLEX_RETRY_DELAY` | Base delay in seconds between retries — staggered linearly (default: `30`) |
 
-## Usage
+On a `SeriesAdd` or `MovieAdded` event, Themarr starts a background thread that polls Plex for the new item and downloads its theme as soon as it appears. Delays are `30 s, 60 s, 90 s, …` up to `PLEX_RETRY_ATTEMPTS * PLEX_RETRY_DELAY` total wait time.
 
-### One-Time Download
+Supported webhook event types:
 
-```bash
-docker-compose --env-file .env run --rm themarr
-```
+| Source | Handled events |
+|---|---|
+| Sonarr | `SeriesAdd`, `SeriesDelete` (logged, no action), `Test` |
+| Radarr | `MovieAdded`, `MovieDeleted` (logged, no action), `Test` |
 
-### Continuous Service
+## Web app API
 
-```bash
-# Start
-docker-compose --env-file .env up -d
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/status` | Plex connection health |
+| `GET` | `/api/libraries` | List TV/Movie libraries |
+| `GET` | `/api/libraries/<id>/items` | Items in a library with theme status |
+| `GET` | `/api/poster/<key>` | Proxy Plex poster image |
+| `GET` | `/api/items/<key>/theme` | Stream local `theme.mp3` |
+| `GET` | `/api/items/<key>/theme/preview` | Stream Plex theme without saving |
+| `POST` | `/api/items/<key>/theme/download` | Download theme from Plex |
+| `POST` | `/api/items/<key>/theme/upload` | Upload a custom MP3 |
+| `POST` | `/api/items/<key>/theme/youtube` | Download from YouTube URL |
+| `DELETE` | `/api/items/<key>/theme` | Delete local `theme.mp3` |
+| `POST` | `/api/bulk/theme/download` | Bulk-download themes (`ratingKeys` list, max 100) |
+| `POST` | `/api/webhooks/sonarr` | Sonarr webhook receiver |
+| `POST` | `/api/webhooks/radarr` | Radarr webhook receiver |
+| `POST` | `/api/settings/test-pushover` | Send a test Pushover notification |
+| `POST` | `/api/settings/rescan` | Rescan local files and return theme counts |
 
-# View logs
-docker-compose logs -f themarr
-
-# Stop
-docker-compose down
-```
-
-### Overwrite Existing Themes
-
-```bash
-OVERWRITE=true docker-compose --env-file .env run --rm themarr
-```
-
-### Verbose Output
-
-```bash
-VERBOSE=true VERBOSE_MATCHING=true docker-compose --env-file .env run --rm themarr
-```
-
-## Getting Your Plex Token
-
-### Browser Developer Console
-
-1. Open https://www.plex.tv/ and sign in
-2. Open browser DevTools (F12)
-3. Go to **Network** tab
-4. Refresh page
-5. Look for any Plex server request
-6. Copy the `X-Plex-Token` header value
-
-### cURL Command
+## CLI batch downloader
 
 ```bash
-curl -X GET https://plex.tv/api/v2/user \
-  -H "Accept: application/json" \
-  -u "your-email@example.com:your-password"
+# Run once for TV + Movies
+docker compose run --rm themarr python plex_theme_downloader.py
 ```
 
-### Plex Direct URL Method
-
-1. Go to https://www.plex.tv/your-account/
-2. Click "Authorized Devices & Applications"
-3. Find your token in the authorization headers
-
-## Architecture
-
-### Core Components
-
-- **PlexThemeDownloader**: Plex API client for authentication and theme retrieval
-- **TVShowScanner**: Local filesystem scanner with theme.mp3 detection
-- **match_shows()**: Intelligent show matching using Plex metadata
-- **download_theme()**: Streaming MP3 download with error handling
-
-### Key Implementation Details
-
-- **Path Extraction**: Uses `show.locations[0]` directly from Plex API for 98.7% accuracy
-- **Chunk Streaming**: 8KB chunks prevent memory bloat on large files
-- **Case-Insensitive Matching**: Normalizes folder names for matching
-- **Graceful Error Handling**: Continues on individual download failures
-- **Comprehensive Logging**: Debug and info levels for troubleshooting
-
-## Performance Metrics
-
-- **Accuracy**: 98.7% folder-to-show matching
-- **Speed**: ~30 seconds for 101 themes (varies by file sizes and network)
-- **Coverage**: Successfully handles 149 shows with 151 local folders
-- **Success Rate**: 100% download success with proper Plex access
-- **Memory Usage**: Efficient streaming prevents large buffers
-
-## Troubleshooting
-
-### No Themes Downloaded
-
-**Symptoms**: Script runs but shows "0 themes downloaded"
-
-**Solutions**:
-- Verify Plex token is valid: `curl -H "X-Plex-Token: YOUR_TOKEN" http://plex-url:32400/library/sections`
-- Check Plex library name matches configuration exactly
-- Ensure TV shows in Plex actually have themes available
-- Enable `VERBOSE=true` for detailed logging
-
-### Connection Refused
-
-**Symptoms**: "Cannot connect to Plex server"
-
-**Solutions**:
-- Verify `PLEX_URL` is correct and accessible from container
-- Test connectivity: `docker-compose run --rm themarr curl http://plex-url:32400`
-- For local networks, use IP address instead of hostname
-- Check firewall rules on port 32400
-
-### Permission Denied
-
-**Symptoms**: "Permission denied" when creating theme.mp3
-
-**Solutions**:
-- Verify NFS mount has `rw` permissions
-- Check folder permissions: `chmod 755 /path/to/tvshows/`
-- Ensure Docker container can write to mounted volume
-
-### Shows Not Matching
-
-**Symptoms**: Only partial match, some shows skipped
-
-**Solutions**:
-- Enable `VERBOSE_MATCHING=true` to see matching logic
-- Verify local folder names correspond to Plex show titles
-- Check `show.locations` output in logs
-- Ensure no leading/trailing spaces in folder names
-
-## Development
-
-### Local Setup
+Or locally:
 
 ```bash
 pip install -r requirements.txt
 python3 plex_theme_downloader.py
 ```
 
-### Docker Build
+## Docker image
+
+The image is automatically built and pushed to GitHub Container Registry on every push to `main` and on semver tags.
+
+```
+ghcr.io/timoverbrugghe/themarr:latest   ← latest main build
+ghcr.io/timoverbrugghe/themarr:main     ← explicit main tag
+ghcr.io/timoverbrugghe/themarr:1.2.3   ← tagged release
+```
+
+Multi-platform: `linux/amd64` and `linux/arm64`.
+
+## Validation
 
 ```bash
-docker build -t themarr:latest .
-docker-compose up --build
+python3 -m py_compile plex_theme_downloader.py
+python3 -m py_compile web_app.py
+docker compose config
+docker build -t themarr:test .
+python3 -m pytest tests/ -v
 ```
 
-### Dependencies
+### Regenerating screenshots
 
-- `plexapi==4.15.1` - Official Plex API wrapper
-- `requests==2.31.0` - HTTP client library
-- `Python 3.11+`
+If you change `templates/index.html`, `static/css/style.css`, or
+`static/js/app.js`, regenerate the screenshots:
 
-## File Structure
-
-```
-.
-├── plex_theme_downloader.py  # Main application
-├── docker-compose.yml         # Docker Compose configuration
-├── Dockerfile                 # Container image definition
-├── requirements.txt           # Python dependencies
-├── .env.example              # Environment variables template
-├── .gitignore                # Git ignore rules
-└── README.md                 # This file
+```bash
+pip install playwright && playwright install chromium
+python3 scripts/take_screenshots.py
 ```
 
-## Contributing
+This requires no Plex server — all API calls are intercepted with mock data.
+The `.github/workflows/screenshots.yml` CI workflow does this automatically
+for PRs that touch UI files.
 
-Contributions welcome! Please ensure:
-- Code follows existing style
-- Docker builds without errors
-- No hardcoded credentials
-- Comprehensive logging statements
-
-## License
-
-MIT
-
-## Support
-
-For issues or questions, please open an issue on GitHub.
