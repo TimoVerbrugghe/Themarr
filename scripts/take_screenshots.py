@@ -152,7 +152,7 @@ def _start_flask(port: int = 18080) -> subprocess.Popen:
 
 def take_screenshots(base_url: str = "http://127.0.0.1:18080") -> None:
     try:
-        from playwright.sync_api import sync_playwright, Route, Request
+        from playwright.sync_api import sync_playwright, Route, Request, TimeoutError as PlaywrightTimeoutError
     except ImportError:
         print("ERROR: playwright is not installed.")
         print("  pip install playwright && playwright install chromium")
@@ -329,15 +329,26 @@ def take_screenshots(base_url: str = "http://127.0.0.1:18080") -> None:
         page.click("#view-btn-list")
         page.wait_for_selector(".items-list", timeout=3000)
         page.wait_for_timeout(300)
-        yt_buttons = page.query_selector_all(".action-btn-youtube")
-        if yt_buttons:
-            yt_buttons[0].click()
+        yt_clicked = False
+        visible_yt_button = page.locator(".item-row .action-btn-youtube:visible").first
+        try:
+            visible_yt_button.click(timeout=2000)
+            yt_clicked = True
+        except PlaywrightTimeoutError:
+            # Small-screen list view uses an overflow actions menu; open it first.
+            action_toggle = page.locator(".item-row .item-actions-disclosure > summary:visible").first
+            if action_toggle.count():
+                action_toggle.click()
+                page.locator(".item-row .item-actions-disclosure[open] .action-btn-youtube:visible").first.click(timeout=3000)
+                yt_clicked = True
+
+        if yt_clicked:
             page.wait_for_selector(".yt-result", timeout=5000)
             page.wait_for_timeout(500)
             page.screenshot(path=str(SCREENSHOTS_DIR / "12_youtube_search_modal.png"))
             print("  ✓ 12_youtube_search_modal.png")
         else:
-            print("  ⚠ 12_youtube_search_modal.png — no YouTube button found, skipped")
+            print("  ⚠ 12_youtube_search_modal.png — no visible YouTube action found, skipped")
 
         page.close()
         browser.close()
