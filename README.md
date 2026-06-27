@@ -10,46 +10,41 @@ Themarr manages Plex theme music for TV shows and movies. It includes a Flask-ba
 
 Screenshots are kept up-to-date automatically:
 
-- PRs that touch `templates/`, `static/`, or `web_app.py` trigger the
+- Pushes to `main` that touch `templates/`, `static/`, or `web_app.py`
+  (typically after a PR merge) trigger the
   [screenshots workflow](.github/workflows/screenshots.yml), which regenerates
-  screenshots and uploads them as a workflow artifact for review.
-- Pushes to `main` that touch those files regenerate screenshots and commit
-  them back to `main`.
+  screenshots and commits them back to `main`.
 - Commits/PRs that directly modify `screenshots/**` are auto-sanitized by
   `.github/workflows/sanitize-screenshot-changes.yml` (same-repo branches/PRs).
   For fork PRs, the workflow cannot push fixes and fails with instructions.
 
 ### Dark theme
 
-| Welcome | Poster view (grid) |
+| Poster view | List view |
 |---|---|
-| ![Welcome screen](screenshots/01_welcome.png) | ![TV Shows poster view](screenshots/02_tv_library_poster.png) |
+| ![Poster view dark](screenshots/01_poster_view_dark.png) | ![List view dark](screenshots/02_list_view_dark.png) |
 
-| List view (with inline play/pause) | Filter: No Theme (list) |
+| YouTube downloader | Copy theme from |
 |---|---|
-| ![TV Shows list view](screenshots/03_tv_library_list.png) | ![Filter no theme](screenshots/04_filter_no_theme_list.png) |
+| ![YouTube downloader dark](screenshots/03_youtube_downloader_dark.png) | ![Copy theme dark](screenshots/04_copy_theme_dark.png) |
 
-| Bulk select (poster) | Bulk select (list) |
-|---|---|
-| ![Bulk select poster view](screenshots/05_bulk_select_poster.png) | ![Bulk select list view](screenshots/07_bulk_select_list.png) |
-
-| Settings page |
+| Plex download |
 |---|
-| ![Settings page](screenshots/11_settings.png) |
-
-| YouTube downloader modal | Copy theme modal |
-|---|---|
-| ![YouTube downloader modal](screenshots/12_youtube_search_modal.png) | ![Copy theme modal](screenshots/13_copy_theme_modal.png) |
+| ![Plex download dark](screenshots/05_plex_download_dark.png) |
 
 ### Light theme
 
-| Welcome | Poster view (grid) |
+| Poster view | List view |
 |---|---|
-| ![Welcome screen light](screenshots/08_welcome_light.png) | ![TV Shows poster view light](screenshots/09_tv_library_poster_light.png) |
+| ![Poster view light](screenshots/06_poster_view_light.png) | ![List view light](screenshots/07_list_view_light.png) |
 
-| List view |
+| YouTube downloader | Copy theme from |
+|---|---|
+| ![YouTube downloader light](screenshots/08_youtube_downloader_light.png) | ![Copy theme light](screenshots/09_copy_theme_light.png) |
+
+| Plex download |
 |---|
-| ![TV Shows list view light](screenshots/10_tv_library_list_light.png) |
+| ![Plex download light](screenshots/10_plex_download_light.png) |
 
 ## Features
 
@@ -205,7 +200,6 @@ python3 -m pytest tests/ -v
 If you change `templates/index.html`, `static/css/style.css`, or
 `static/js/app.js`, CI will regenerate screenshots automatically.
 The `.github/workflows/screenshots.yml` CI workflow does this automatically
-for PRs that touch UI files (artifact upload) and after merge on `main`
-(auto-commit).
+after merge on `main` (auto-commit).
 If `screenshots/**` changes are committed in branch work, CI sanitizes them for
 same-repo branches/PRs.

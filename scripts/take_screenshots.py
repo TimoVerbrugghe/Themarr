@@ -3,10 +3,11 @@
 Automated screenshot script for Themarr web UI.
 
 Uses Playwright to launch a real browser, intercepts all /api/* calls with
-mock data, and captures screenshots of every major UI state. Generated mock
-poster/thumbnail artwork is served so card visuals are meaningful in captures.
-Screenshots are
-written to the screenshots/ directory in the repo root.
+mock data, and captures the README screenshot set in both dark and light
+themes (poster view, list view, YouTube downloader, copy-theme modal, and
+Plex download modal). Generated mock poster/thumbnail artwork is served so card
+visuals are meaningful in captures. Screenshots are written to the
+screenshots/ directory in the repo root.
 
 Usage:
     pip install playwright
@@ -212,13 +213,15 @@ def _start_flask(port: int = 18080) -> subprocess.Popen:
 
 def take_screenshots(base_url: str = "http://127.0.0.1:18080") -> None:
     try:
-        from playwright.sync_api import sync_playwright, Route, Request, TimeoutError as PlaywrightTimeoutError
+        from playwright.sync_api import sync_playwright, Route, Request
     except ImportError:
         print("ERROR: playwright is not installed.")
         print("  pip install playwright && playwright install chromium")
         sys.exit(1)
 
     SCREENSHOTS_DIR.mkdir(exist_ok=True)
+    for png_path in SCREENSHOTS_DIR.glob("*.png"):
+        png_path.unlink()
 
     def route_handler(route: Route, request: Request) -> None:
         """Intercept /api/* requests and return mock JSON."""
@@ -269,8 +272,8 @@ def take_screenshots(base_url: str = "http://127.0.0.1:18080") -> None:
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
 
-        def new_page(theme: str = "dark") -> object:
-            page = browser.new_page(viewport={"width": 1400, "height": 900})
+        def new_page(theme: str = "dark"):
+            page = browser.new_page(viewport={"width": 1500, "height": 960})
             page.route("**/api/**", route_handler)
             page.route("https://i.ytimg.com/**", route_handler)
             # Pre-set theme in localStorage before app scripts execute.
@@ -289,168 +292,72 @@ def take_screenshots(base_url: str = "http://127.0.0.1:18080") -> None:
             )
             return page
 
-        # ------------------------------------------------------------------
-        # 01 — Welcome screen (dark)
-        # ------------------------------------------------------------------
-        page = new_page("dark")
-        page.wait_for_selector("#welcome-screen:not(.hidden)", timeout=5000)
-        page.screenshot(path=str(SCREENSHOTS_DIR / "01_welcome.png"))
-        print("  ✓ 01_welcome.png")
+        screenshot_plan = {
+            "dark": {
+                "poster": "01_poster_view_dark.png",
+                "list": "02_list_view_dark.png",
+                "youtube": "03_youtube_downloader_dark.png",
+                "copy": "04_copy_theme_dark.png",
+                "plex": "05_plex_download_dark.png",
+            },
+            "light": {
+                "poster": "06_poster_view_light.png",
+                "list": "07_list_view_light.png",
+                "youtube": "08_youtube_downloader_light.png",
+                "copy": "09_copy_theme_light.png",
+                "plex": "10_plex_download_light.png",
+            },
+        }
 
-        # ------------------------------------------------------------------
-        # 02 — TV library, poster view (dark)
-        # ------------------------------------------------------------------
-        page.click("text=TV Shows")
-        page.wait_for_timeout(400)
-        page.click("#view-btn-grid")
-        page.wait_for_selector(".items-grid", timeout=5000)
-        page.wait_for_timeout(400)
-        page.screenshot(path=str(SCREENSHOTS_DIR / "02_tv_library_poster.png"))
-        print("  ✓ 02_tv_library_poster.png")
+        def capture_theme(theme: str, names: dict) -> None:
+            page = new_page(theme)
+            page.click("text=TV Shows")
+            page.wait_for_selector("#library-view:not(.hidden)", timeout=5000)
+            page.wait_for_selector(".item-card, .item-row", timeout=5000)
+            page.wait_for_timeout(300)
 
-        # ------------------------------------------------------------------
-        # 03 — TV library, list view (dark)
-        # ------------------------------------------------------------------
-        page.click("#view-btn-list")
-        page.wait_for_selector(".items-list", timeout=3000)
-        page.wait_for_timeout(300)
-        page.screenshot(path=str(SCREENSHOTS_DIR / "03_tv_library_list.png"))
-        print("  ✓ 03_tv_library_list.png")
+            page.click("#view-btn-grid")
+            page.wait_for_selector(".items-grid .item-card", timeout=5000)
+            page.wait_for_timeout(250)
+            page.screenshot(path=str(SCREENSHOTS_DIR / names["poster"]))
+            print(f"  ✓ {names['poster']}")
 
-        # ------------------------------------------------------------------
-        # 04 — Filter: No Theme (list view, dark)
-        # ------------------------------------------------------------------
-        page.click("#filter-no-theme")
-        page.wait_for_timeout(300)
-        page.screenshot(path=str(SCREENSHOTS_DIR / "04_filter_no_theme_list.png"))
-        print("  ✓ 04_filter_no_theme_list.png")
+            page.click("#view-btn-list")
+            page.wait_for_selector(".items-list .item-row", timeout=5000)
+            page.wait_for_timeout(250)
+            page.screenshot(path=str(SCREENSHOTS_DIR / names["list"]))
+            print(f"  ✓ {names['list']}")
 
-        # ------------------------------------------------------------------
-        # 05 — Bulk select, poster view (dark)
-        # ------------------------------------------------------------------
-        page.click("#filter-all")
-        page.click("#view-btn-grid")
-        page.wait_for_selector(".items-grid", timeout=3000)
-        page.wait_for_timeout(300)
-        # Select first 3 items
-        cards = page.query_selector_all(".item-card .item-select-wrap input[type='checkbox']")
-        for card in cards[:3]:
-            card.check()
-        page.wait_for_timeout(300)
-        page.screenshot(path=str(SCREENSHOTS_DIR / "05_bulk_select_poster.png"))
-        print("  ✓ 05_bulk_select_poster.png")
-
-        # ------------------------------------------------------------------
-        # 06 — Search (dark)
-        # ------------------------------------------------------------------
-        for card in cards[:3]:
-            card.uncheck()
-        page.fill("#search-input", "break")
-        page.wait_for_timeout(300)
-        page.screenshot(path=str(SCREENSHOTS_DIR / "06_search.png"))
-        print("  ✓ 06_search.png")
-
-        # ------------------------------------------------------------------
-        # 07 — Bulk select, list view (dark)
-        # ------------------------------------------------------------------
-        page.fill("#search-input", "")
-        page.click("#view-btn-list")
-        page.wait_for_selector(".items-list", timeout=3000)
-        page.wait_for_timeout(300)
-        rows = page.query_selector_all(".item-row input[type='checkbox']")
-        for row in rows[:4]:
-            row.check()
-        page.wait_for_timeout(300)
-        page.screenshot(path=str(SCREENSHOTS_DIR / "07_bulk_select_list.png"))
-        print("  ✓ 07_bulk_select_list.png")
-
-        page.close()
-
-        # ------------------------------------------------------------------
-        # 08 — Welcome screen (light)
-        # ------------------------------------------------------------------
-        page = new_page("light")
-        page.wait_for_selector("#welcome-screen:not(.hidden)", timeout=5000)
-        page.screenshot(path=str(SCREENSHOTS_DIR / "08_welcome_light.png"))
-        print("  ✓ 08_welcome_light.png")
-
-        # ------------------------------------------------------------------
-        # 09 — TV library, poster view (light)
-        # ------------------------------------------------------------------
-        page.click("text=TV Shows")
-        page.wait_for_timeout(400)
-        page.click("#view-btn-grid")
-        page.wait_for_selector(".items-grid", timeout=5000)
-        page.wait_for_timeout(400)
-        page.screenshot(path=str(SCREENSHOTS_DIR / "09_tv_library_poster_light.png"))
-        print("  ✓ 09_tv_library_poster_light.png")
-
-        # ------------------------------------------------------------------
-        # 10 — TV library, list view (light)
-        # ------------------------------------------------------------------
-        page.click("#view-btn-list")
-        page.wait_for_selector(".items-list", timeout=3000)
-        page.wait_for_timeout(300)
-        page.screenshot(path=str(SCREENSHOTS_DIR / "10_tv_library_list_light.png"))
-        print("  ✓ 10_tv_library_list_light.png")
-
-        # ------------------------------------------------------------------
-        # 11 — Settings page (dark)
-        # ------------------------------------------------------------------
-        page.close()
-        page = new_page("dark")
-        page.click("#settings-nav-item")
-        page.wait_for_selector("#settings-view:not(.hidden)", timeout=5000)
-        page.wait_for_timeout(300)
-        page.screenshot(path=str(SCREENSHOTS_DIR / "11_settings.png"))
-        print("  ✓ 11_settings.png")
-
-        # ------------------------------------------------------------------
-        # 12 — YouTube search modal (dark)
-        # ------------------------------------------------------------------
-        page.close()
-        page = new_page("dark")
-        page.click("text=TV Shows")
-        page.wait_for_selector(".items-list, .items-grid", timeout=5000)
-        page.wait_for_timeout(400)
-        # Click the YouTube button on the first item in list view
-        page.click("#view-btn-list")
-        page.wait_for_selector(".items-list", timeout=3000)
-        page.wait_for_timeout(300)
-        yt_clicked = False
-        visible_yt_button = page.locator(".item-row .action-btn-youtube:visible").first
-        try:
-            visible_yt_button.click(timeout=2000)
-            yt_clicked = True
-        except PlaywrightTimeoutError:
-            # Small-screen list view uses an overflow actions menu; open it first.
-            action_toggle = page.locator(".item-row .item-actions-disclosure > summary:visible").first
-            if action_toggle.count():
-                action_toggle.click()
-                page.locator(".item-row .item-actions-disclosure[open] .action-btn-youtube:visible").first.click(timeout=3000)
-                yt_clicked = True
-
-        if yt_clicked:
+            page.locator(".item-row .action-btn-youtube:visible").first.click()
+            page.wait_for_selector("#modal-youtube:not(.hidden)", timeout=5000)
             page.wait_for_selector(".yt-result", timeout=5000)
-            page.wait_for_timeout(500)
-            page.screenshot(path=str(SCREENSHOTS_DIR / "12_youtube_search_modal.png"))
-            print("  ✓ 12_youtube_search_modal.png")
-        else:
-            print("  ⚠ 12_youtube_search_modal.png — no visible YouTube action found, skipped")
+            page.wait_for_timeout(250)
+            page.screenshot(path=str(SCREENSHOTS_DIR / names["youtube"]))
+            print(f"  ✓ {names['youtube']}")
+            page.click("#modal-youtube .modal-close")
+            page.wait_for_selector("#modal-youtube", state="hidden", timeout=5000)
 
-        # ------------------------------------------------------------------
-        # 13 — Copy theme modal (dark)
-        # ------------------------------------------------------------------
-        page.click("#modal-youtube .modal-close")
-        page.wait_for_selector("#modal-youtube", state="hidden", timeout=5000)
-        page.locator(".action-btn-copy").first.click()
-        page.wait_for_selector("#modal-copy-theme:not(.hidden)", timeout=5000)
-        page.wait_for_selector("#copy-theme-source-item:not([disabled])", timeout=5000)
-        page.wait_for_timeout(500)
-        page.screenshot(path=str(SCREENSHOTS_DIR / "13_copy_theme_modal.png"))
-        print("  ✓ 13_copy_theme_modal.png")
+            page.locator(".item-row .action-btn-copy:visible").first.click()
+            page.wait_for_selector("#modal-copy-theme:not(.hidden)", timeout=5000)
+            page.wait_for_selector("#copy-theme-source-item:not([disabled])", timeout=5000)
+            page.wait_for_timeout(250)
+            page.screenshot(path=str(SCREENSHOTS_DIR / names["copy"]))
+            print(f"  ✓ {names['copy']}")
+            page.click("#modal-copy-theme .modal-close")
+            page.wait_for_selector("#modal-copy-theme", state="hidden", timeout=5000)
 
-        page.close()
+            page.locator(".item-row .action-btn-download:visible").first.click()
+            page.wait_for_selector("#modal-download:not(.hidden)", timeout=5000)
+            page.wait_for_function(
+                "() => document.getElementById('modal-download-message').textContent.trim().length > 0",
+            )
+            page.wait_for_timeout(250)
+            page.screenshot(path=str(SCREENSHOTS_DIR / names["plex"]))
+            print(f"  ✓ {names['plex']}")
+            page.close()
+
+        capture_theme("dark", screenshot_plan["dark"])
+        capture_theme("light", screenshot_plan["light"])
         browser.close()
 
 
