@@ -609,6 +609,12 @@ def index():
     )
 
 
+@app.route('/health')
+def health():
+    """Health check endpoint for container orchestration systems."""
+    return jsonify({'status': 'healthy'}), 200
+
+
 @app.route('/api/status')
 def get_status():
     """Check Plex connection status."""

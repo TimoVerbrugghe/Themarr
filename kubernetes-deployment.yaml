@@ -1,0 +1,254 @@
+---
+# Kubernetes Deployment manifest for Themarr with security hardening
+# This demonstrates how to deploy Themarr with proper securityContext,
+# resource limits, and other security best practices.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: themarr
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: themarr-config
+  namespace: themarr
+data:
+  # Update these values to match your environment
+  PLEX_URL: "http://plex.example.com:32400"
+  DEFAULT_THEME: "dark"
+  DEFAULT_VIEW: "list"
+  # Optional: Pushover notification settings (leave empty to disable)
+  # PUSHOVER_APP_TOKEN: ""
+  # PUSHOVER_USER_KEY: ""
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: themarr-plex-secret
+  namespace: themarr
+type: Opaque
+stringData:
+  PLEX_TOKEN: "your-plex-token-here"
+  # Optional: webhook authentication credentials
+  # WEBHOOK_USERNAME: "webhookuser"
+  # WEBHOOK_PASSWORD: "webhookpass"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: themarr
+  namespace: themarr
+  labels:
+    app: themarr
+    version: v1
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: themarr
+  template:
+    metadata:
+      labels:
+        app: themarr
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/themarr: runtime/default
+    spec:
+      # Pod-level security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534  # nobody user
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+      - name: themarr
+        image: ghcr.io/timoverbrugghe/themarr:latest
+        imagePullPolicy: Always
+
+        # Container-level security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65534
+          runAsGroup: 65534
+
+        # Environment variables from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: themarr-config
+
+        # Sensitive environment variables from Secret
+        env:
+        - name: PLEX_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: themarr-plex-secret
+              key: PLEX_TOKEN
+        - name: FLASK_DEBUG
+          value: "false"
+
+        # Port configuration
+        ports:
+        - name: web
+          containerPort: 8080
+          protocol: TCP
+
+        # Volume mounts for writable directories
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: run
+          mountPath: /run
+        # Media library mounts (writable for theme.mp3 output)
+        - name: tv-shows
+          mountPath: /mnt/tv
+        - name: movies
+          mountPath: /mnt/movies
+
+        # Resource requests and limits
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+
+        # Liveness probe: checks if the application is running
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: web
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        # Readiness probe: checks if the application is ready to serve traffic
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: web
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+      # Pod-level DNS configuration (optional)
+      dnsPolicy: ClusterFirst
+
+      # Restart policy
+      restartPolicy: Always
+
+      # Service account (uses default, can be customized for RBAC)
+      serviceAccountName: default
+
+      # Affinity rules (optional, customize based on your cluster)
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - themarr
+              topologyKey: kubernetes.io/hostname
+
+      # Volumes
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 512Mi
+      - name: run
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
+      # Media library mounts (update these to match your storage setup)
+      - name: tv-shows
+        hostPath:
+          path: /mnt/tv
+          type: Directory
+      - name: movies
+        hostPath:
+          path: /mnt/movies
+          type: Directory
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: themarr
+  namespace: themarr
+  labels:
+    app: themarr
+spec:
+  type: ClusterIP
+  selector:
+    app: themarr
+  ports:
+  - name: web
+    port: 80
+    targetPort: web
+    protocol: TCP
+
+---
+# Optional: NetworkPolicy to restrict pod traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: themarr-network-policy
+  namespace: themarr
+spec:
+  podSelector:
+    matchLabels:
+      app: themarr
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  # Allow DNS
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow external HTTPS (for Plex communication)
+  - to:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 32400  # Plex default port
+  # Allow internal Plex communication
+  - to:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8080
