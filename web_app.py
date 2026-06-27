@@ -598,6 +598,8 @@ def youtube_search():
             'no_warnings': True,
             'extract_flat': True,
             'skip_download': True,
+            'js_runtimes': {'node': {}},
+            'remote_components': ['ejs:github'],
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f'ytsearch{limit}:{query}', download=False)
@@ -670,6 +672,8 @@ def download_from_youtube(rating_key):
                 'noplaylist': True,
                 'match_filter': youtube_match_filter,
                 'max_filesize': MAX_UPLOAD_BYTES,
+                'js_runtimes': {'node': {}},
+                'remote_components': ['ejs:github'],
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([youtube_url])
