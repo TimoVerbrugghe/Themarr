@@ -551,6 +551,20 @@ a:hover { color: var(--accent-hover); }
   flex-wrap: nowrap;
   gap: 6px;
 }
+.item-actions-disclosure {
+  position: relative;
+}
+.item-actions-disclosure > summary {
+  list-style: none;
+}
+.item-actions-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.item-actions-menu {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+}
 .action-btn {
   width: 100%;
   padding: 5px 8px;
@@ -572,6 +586,9 @@ a:hover { color: var(--accent-hover); }
   flex: none;
   font-size: 11px;
   padding: 5px 10px;
+}
+.action-btn-menu-toggle {
+  display: none;
 }
 .action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
@@ -1117,6 +1134,47 @@ a:hover { color: var(--accent-hover); }
 @media (max-width: 768px) {
   .sidebar { width: 180px; }
   .items-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+
+  .item-actions-disclosure {
+    margin-left: auto;
+  }
+  .item-actions-disclosure > .action-btn-menu-toggle {
+    display: inline-flex;
+    width: auto;
+    flex: none;
+    font-size: 11px;
+    padding: 5px 10px;
+    color: var(--text-muted);
+    border-color: var(--border-strong);
+  }
+  .item-actions-disclosure > .action-btn-menu-toggle:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+  .item-actions-disclosure > .item-actions-menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 20;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 220px;
+    padding: 6px;
+    border-radius: 6px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-card);
+    box-shadow: 0 8px 20px var(--shadow-medium);
+  }
+  .item-actions-disclosure[open] > .item-actions-menu {
+    display: flex;
+  }
+  .item-actions-disclosure > .item-actions-menu .action-btn,
+  .item-actions-row .item-actions-menu .action-btn {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 @media (max-width: 560px) {
   .app-layout { flex-direction: column; }

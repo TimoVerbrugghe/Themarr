@@ -370,19 +370,19 @@ function createItemCard(item) {
   const actions = document.createElement('div');
   actions.className = 'item-actions';
 
-  // Button order: Download from Plex → Copy theme from → YouTube → Upload → Delete
+  // Button order: Download from Plex → YouTube → Copy theme from → Upload → Delete
   const downloadButton = createActionButton('action-btn action-btn-download', 'Download from Plex', BTN_PLEX[1]);
   downloadButton.disabled = !item.has_plex_theme;
   downloadButton.addEventListener('click', () => openDownloadModal(item.ratingKey, item.title, item.has_local_theme, item.has_plex_theme));
   actions.appendChild(downloadButton);
 
-  const copyButton = createActionButton('action-btn action-btn-copy', 'Copy theme from another item', BTN_COPY[1]);
-  copyButton.addEventListener('click', () => openCopyThemeModal(item.ratingKey, item.title, item.has_local_theme));
-  actions.appendChild(copyButton);
-
   const youtubeButton = createActionButton('action-btn action-btn-youtube', 'Download from YouTube', BTN_YOUTUBE[1]);
   youtubeButton.addEventListener('click', () => openYoutubeModal(item.ratingKey, item.title, item.has_local_theme));
   actions.appendChild(youtubeButton);
+
+  const copyButton = createActionButton('action-btn action-btn-copy', 'Copy theme from another item', BTN_COPY[1]);
+  copyButton.addEventListener('click', () => openCopyThemeModal(item.ratingKey, item.title, item.has_local_theme));
+  actions.appendChild(copyButton);
 
   const uploadButton = createActionButton('action-btn action-btn-upload', 'Upload custom theme', BTN_UPLOAD[1]);
   uploadButton.addEventListener('click', () => openUploadModal(item.ratingKey, item.title, item.has_local_theme));
@@ -463,31 +463,42 @@ function createItemRow(item) {
     row.appendChild(playBtn);
   }
 
-  const actions = document.createElement('div');
-  actions.className = 'item-actions item-actions-row';
+  const actions = document.createElement('details');
+  actions.className = 'item-actions item-actions-row item-actions-disclosure';
 
-  // Button order: Download from Plex → Copy theme from → YouTube → Upload → Delete
+  const actionMenuToggle = document.createElement('summary');
+  actionMenuToggle.className = 'action-btn action-btn-menu-toggle';
+  actionMenuToggle.title = 'More actions';
+  actionMenuToggle.innerHTML = '⋯ Actions';
+  actions.appendChild(actionMenuToggle);
+
+  const actionMenu = document.createElement('div');
+  actionMenu.className = 'item-actions-menu';
+
+  // Button order: Download from Plex → YouTube → Copy theme from → Upload → Delete
   const downloadButton = createActionButton('action-btn action-btn-download', 'Download from Plex', BTN_PLEX[2]);
   downloadButton.disabled = !item.has_plex_theme;
   downloadButton.addEventListener('click', () => openDownloadModal(item.ratingKey, item.title, item.has_local_theme, item.has_plex_theme));
-  actions.appendChild(downloadButton);
-
-  const copyButton = createActionButton('action-btn action-btn-copy', 'Copy theme from another item', BTN_COPY[2]);
-  copyButton.addEventListener('click', () => openCopyThemeModal(item.ratingKey, item.title, item.has_local_theme));
-  actions.appendChild(copyButton);
+  actionMenu.appendChild(downloadButton);
 
   const youtubeButton = createActionButton('action-btn action-btn-youtube', 'Download from YouTube', BTN_YOUTUBE[2]);
   youtubeButton.addEventListener('click', () => openYoutubeModal(item.ratingKey, item.title, item.has_local_theme));
-  actions.appendChild(youtubeButton);
+  actionMenu.appendChild(youtubeButton);
+
+  const copyButton = createActionButton('action-btn action-btn-copy', 'Copy theme from another item', BTN_COPY[2]);
+  copyButton.addEventListener('click', () => openCopyThemeModal(item.ratingKey, item.title, item.has_local_theme));
+  actionMenu.appendChild(copyButton);
 
   const uploadButton = createActionButton('action-btn action-btn-upload', 'Upload custom theme', BTN_UPLOAD[2]);
   uploadButton.addEventListener('click', () => openUploadModal(item.ratingKey, item.title, item.has_local_theme));
-  actions.appendChild(uploadButton);
+  actionMenu.appendChild(uploadButton);
 
   const deleteButton = createActionButton('action-btn action-btn-delete', 'Delete theme', '🗑 Delete');
   deleteButton.disabled = !item.has_local_theme;
   deleteButton.addEventListener('click', () => openDeleteModal(item.ratingKey, item.title));
-  actions.appendChild(deleteButton);
+  actionMenu.appendChild(deleteButton);
+
+  actions.appendChild(actionMenu);
 
   row.appendChild(actions);
   return row;
