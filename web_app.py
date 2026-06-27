@@ -29,6 +29,9 @@ PLEX_RETRY_DELAY_DEFAULT = 30  # seconds between retry attempts
 ALLOWED_UPLOAD_TYPES = {'audio/mpeg', 'audio/mp3', 'application/octet-stream'}
 ALLOWED_YOUTUBE_HOSTS = {'youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be'}
 
+# In-memory cache for library items, warmed at startup to make first page loads instant.
+_library_cache: dict = {}        # {section_id: [item_dict, ...]}
+_library_cache_lock = threading.Lock()
 
 def error_response(message, status_code=500, exc=None):
     """Return a safe JSON error response while logging internal details."""
@@ -53,6 +56,27 @@ def plex_session_get(plex, url, **kwargs):
     # plexapi does not expose a higher-level helper for arbitrary media proxying,
     # so these web endpoints intentionally reuse its authenticated requests session.
     return plex._session.get(url, **kwargs)
+
+
+def scan_local_theme_dirs(base_paths):
+    """Scan base directories and return a dict mapping directory path -> theme.mp3 size.
+
+    Does a single glob pass per base directory instead of one stat() per item,
+    which dramatically reduces NFS round-trips when libraries are large.
+    """
+    theme_dirs = {}
+    for base in base_paths:
+        try:
+            for p in Path(base).glob('*/theme.mp3'):
+                try:
+                    size = p.stat().st_size
+                    if size > 0:
+                        theme_dirs[str(p.parent)] = size
+                except OSError:
+                    pass
+        except Exception:
+            pass
+    return theme_dirs
 
 
 def resolve_existing_media_path(path_value, item_type):
@@ -265,16 +289,24 @@ def _process_webhook_add(title, path, media_type):
     )
 
 
-def item_to_dict(item):
-    """Serialize a Plex item to a dict for JSON response."""
+def item_to_dict(item, theme_dirs=None):
+    """Serialize a Plex item to a dict for JSON response.
+
+    If *theme_dirs* is provided (a dict from scan_local_theme_dirs), theme
+    existence is resolved via a dict lookup instead of individual stat() calls.
+    """
     local_path = get_item_local_path(item)
     theme_exists = False
     theme_size = 0
     if local_path:
-        theme_path = local_path / 'theme.mp3'
-        if theme_path.exists() and theme_path.stat().st_size > 0:
-            theme_exists = True
-            theme_size = theme_path.stat().st_size
+        if theme_dirs is not None:
+            theme_size = theme_dirs.get(str(local_path), 0)
+            theme_exists = theme_size > 0
+        else:
+            theme_path = local_path / 'theme.mp3'
+            if theme_path.exists() and theme_path.stat().st_size > 0:
+                theme_exists = True
+                theme_size = theme_path.stat().st_size
 
     return {
         'ratingKey': item.ratingKey,
@@ -287,6 +319,52 @@ def item_to_dict(item):
         'theme_size': theme_size,
         'local_path': str(local_path) if local_path else None,
     }
+
+
+# ============================================================
+# Library item cache
+# ============================================================
+
+def _build_library_items(section_id):
+    """Fetch and return sorted item dicts for a Plex section (no caching)."""
+    plex = get_plex()
+    section = plex.library.sectionByID(section_id)
+    tv_path = os.getenv('TV_PATH') or os.getenv('TV_SHOWS_PATH', '/tv')
+    movies_path = os.getenv('MOVIES_PATH', '/movies')
+    theme_dirs = scan_local_theme_dirs([tv_path, movies_path])
+    items = section.all()
+    result = [item_to_dict(item, theme_dirs) for item in items]
+    result.sort(key=lambda item: item['title'].lower())
+    return result
+
+
+def _invalidate_library_cache():
+    """Drop all cached library sections so the next fetch re-queries Plex."""
+    with _library_cache_lock:
+        _library_cache.clear()
+
+
+def _warm_library_cache():
+    """Background thread: pre-load every show/movie library section into the cache."""
+    logger.info('Library cache warmup starting…')
+    try:
+        plex = get_plex()
+        sections = [s for s in plex.library.sections() if s.type in ('show', 'movie')]
+    except Exception as exc:
+        logger.warning('Library cache warmup: could not connect to Plex: %s', exc)
+        return
+
+    for section in sections:
+        try:
+            items = _build_library_items(section.key)
+            with _library_cache_lock:
+                _library_cache[section.key] = items
+            logger.info('Library cache warmed: section %s (%s) — %d items', section.key, section.title, len(items))
+        except Exception as exc:
+            logger.warning('Library cache warmup failed for section %s: %s', section.key, exc)
+
+    logger.info('Library cache warmup complete.')
+
 
 
 @app.route('/')
@@ -341,13 +419,15 @@ def get_libraries():
 
 @app.route('/api/libraries/<int:section_id>/items')
 def get_library_items(section_id):
-    """Return all items in a library section."""
+    """Return all items in a library section, served from cache when available."""
+    with _library_cache_lock:
+        cached = _library_cache.get(section_id)
+    if cached is not None:
+        return jsonify(cached)
     try:
-        plex = get_plex()
-        section = plex.library.sectionByID(section_id)
-        items = section.all()
-        result = [item_to_dict(item) for item in items]
-        result.sort(key=lambda item: item['title'].lower())
+        result = _build_library_items(section_id)
+        with _library_cache_lock:
+            _library_cache[section_id] = result
         return jsonify(result)
     except Exception as exc:
         return error_response(f'Failed to get items for section {section_id}', exc=exc)
@@ -440,6 +520,7 @@ def download_theme_from_plex(rating_key):
 
         logger.info('Downloaded theme for %s to %s', item.title, theme_path)
         send_pushover_notification('Theme Downloaded', f'{item.title} theme downloaded from Plex')
+        _invalidate_library_cache()
         return jsonify({'success': True, 'path': str(theme_path)})
     except Exception as exc:
         return error_response(f'Failed to download theme from Plex for {rating_key}', exc=exc)
@@ -476,6 +557,7 @@ def upload_theme(rating_key):
 
         logger.info('Uploaded theme for %s to %s', item.title, theme_path)
         send_pushover_notification('Theme Uploaded', f'{item.title} theme uploaded')
+        _invalidate_library_cache()
         return jsonify({'success': True, 'path': str(theme_path)})
     except Exception as exc:
         return error_response(f'Failed to upload theme for {rating_key}', exc=exc)
@@ -534,6 +616,7 @@ def download_from_youtube(rating_key):
 
         logger.info('Downloaded YouTube theme for %s to %s', item.title, theme_path)
         send_pushover_notification('Theme Downloaded', f'{item.title} theme downloaded from YouTube')
+        _invalidate_library_cache()
         return jsonify({'success': True, 'path': str(theme_path)})
     except Exception as exc:
         return error_response(f'Failed YouTube download for {rating_key}', exc=exc)
@@ -553,6 +636,7 @@ def delete_theme(rating_key):
             return jsonify({'error': 'No theme file to delete'}), 404
         theme_path.unlink()
         logger.info('Deleted theme for %s', item.title)
+        _invalidate_library_cache()
         return jsonify({'success': True})
     except Exception as exc:
         return error_response(f'Failed to delete theme for {rating_key}', exc=exc)
@@ -631,6 +715,7 @@ def bulk_download_themes():
             title=f"Themes Downloaded ({len(results['success'])})",
             message=msg,
         )
+        _invalidate_library_cache()
 
     return jsonify(results)
 
@@ -744,6 +829,9 @@ def settings_rescan():
     """Rescan all media library items and count local theme.mp3 files."""
     try:
         plex = get_plex()
+        tv_path = os.getenv('TV_PATH') or os.getenv('TV_SHOWS_PATH', '/tv')
+        movies_path = os.getenv('MOVIES_PATH', '/movies')
+        theme_dirs = scan_local_theme_dirs([tv_path, movies_path])
         sections = plex.library.sections()
         total = 0
         with_theme = 0
@@ -753,10 +841,8 @@ def settings_rescan():
             for item in section.all():
                 total += 1
                 local_path = get_item_local_path(item)
-                if local_path:
-                    theme_path = local_path / 'theme.mp3'
-                    if theme_path.exists() and theme_path.stat().st_size > 0:
-                        with_theme += 1
+                if local_path and str(local_path) in theme_dirs:
+                    with_theme += 1
         return jsonify({
             'success': True,
             'total': total,
@@ -770,4 +856,6 @@ def settings_rescan():
 if __name__ == '__main__':
     port = int(os.getenv('PORT', '8080'))
     debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+    warmup = threading.Thread(target=_warm_library_cache, daemon=True, name='library-cache-warmup')
+    warmup.start()
     app.run(host='0.0.0.0', port=port, debug=debug)

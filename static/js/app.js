@@ -23,6 +23,7 @@ let activeFilter = 'all';
 let activeItemKey = null;
 let currentView = 'grid';
 const selectedItems = new Set();  // ratingKeys of currently selected items
+const libraryCache = new Map();   // libraryId -> items[], cleared on theme changes
 
 // Audio state (list-view inline preview)
 let activeAudio = null;   // HTMLAudioElement currently playing
@@ -138,7 +139,6 @@ async function selectLibrary(id, title) {
   document.getElementById('library-title').textContent = title;
   document.getElementById('library-stats').innerHTML = '';
   document.getElementById('items-grid').innerHTML = '';
-  document.getElementById('items-loading').classList.remove('hidden');
   document.getElementById('search-input').value = '';
 
   document.querySelectorAll('.filter-buttons .btn').forEach((button) => button.classList.remove('active'));
@@ -151,8 +151,20 @@ async function selectLibrary(id, title) {
   // Stop any playing audio
   stopInlineAudio();
 
+  // Serve from cache if available, fetch otherwise
+  if (libraryCache.has(id)) {
+    document.getElementById('items-loading').classList.add('hidden');
+    const items = libraryCache.get(id);
+    currentItems = items;
+    renderItems(items);
+    updateStats(items);
+    return;
+  }
+
+  document.getElementById('items-loading').classList.remove('hidden');
   try {
     const items = await apiGet(`/api/libraries/${id}/items`);
+    libraryCache.set(id, items);
     currentItems = items;
     document.getElementById('items-loading').classList.add('hidden');
     renderItems(items);
@@ -243,14 +255,13 @@ function createItemCard(item) {
   body.appendChild(year);
 
   if (item.has_local_theme) {
-    const audioWrap = document.createElement('div');
-    audioWrap.className = 'item-audio-player';
-    const audio = document.createElement('audio');
-    audio.controls = true;
-    audio.preload = 'none';
-    audio.src = `/api/items/${item.ratingKey}/theme`;
-    audioWrap.appendChild(audio);
-    body.appendChild(audioWrap);
+    const playBtn = document.createElement('button');
+    playBtn.className = 'action-btn-play-inline action-btn-play-wide';
+    playBtn.type = 'button';
+    playBtn.title = 'Preview theme';
+    playBtn.innerHTML = ICON_PLAY;
+    playBtn.addEventListener('click', () => toggleInlineAudio(item.ratingKey, playBtn));
+    body.appendChild(playBtn);
   }
 
   const actions = document.createElement('div');
@@ -547,6 +558,7 @@ async function bulkDownload(overwrite) {
     // Refresh item cards for successfully downloaded items
     if (s > 0 && currentLibraryId) {
       const items = await apiGet(`/api/libraries/${currentLibraryId}/items`);
+      libraryCache.set(currentLibraryId, items);
       currentItems = items;
       updateStats(items);
       renderItems(items);
@@ -770,6 +782,7 @@ async function refreshItem(ratingKey) {
   if (!currentLibraryId) return;
   try {
     const items = await apiGet(`/api/libraries/${currentLibraryId}/items`);
+    libraryCache.set(currentLibraryId, items);
     currentItems = items;
     const updated = items.find((item) => item.ratingKey === ratingKey);
     if (updated) {
@@ -834,6 +847,7 @@ async function settingsTestPlex() {
 async function settingsRefreshLibraries() {
   showSettingsResult(true, 'Refreshing Plex libraries…');
   try {
+    libraryCache.clear();
     await loadLibraries();
     showSettingsResult(true, '✓ Plex libraries refreshed successfully.');
   } catch (err) {
@@ -862,6 +876,7 @@ async function settingsRescan() {
     if (data.error) {
       showSettingsResult(false, `✗ ${data.error}`);
     } else {
+      libraryCache.clear();
       showSettingsResult(
         true,
         `✓ Scan complete — ${data.total} items found: ${data.with_theme} with theme, ${data.without_theme} without.`,

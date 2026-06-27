@@ -15,9 +15,11 @@ if str(PROJECT_ROOT) not in sys.path:
 @pytest.fixture
 def app():
     """Create test Flask app."""
-    from web_app import app as flask_app
-    flask_app.config['TESTING'] = True
-    yield flask_app
+    import web_app
+    web_app.app.config['TESTING'] = True
+    web_app._invalidate_library_cache()
+    yield web_app.app
+    web_app._invalidate_library_cache()
 
 
 @pytest.fixture

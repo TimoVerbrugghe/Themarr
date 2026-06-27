@@ -264,7 +264,8 @@ a:hover { color: var(--accent-hover); }
    ============================================================ */
 .main-content {
   flex: 1;
-  overflow-y: auto;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
   padding: 24px;
   background: var(--bg-app);
   transition: background-color 0.2s;
@@ -549,6 +550,13 @@ a:hover { color: var(--accent-hover); }
 }
 .action-btn-play-inline:hover { background: var(--bg-hover); color: var(--text); }
 .action-btn-play-inline.playing { color: var(--text); background: var(--bg-active); border-color: var(--accent); }
+
+/* Full-width variant for poster/grid cards */
+.action-btn-play-inline.action-btn-play-wide {
+  width: 100%;
+  height: 30px;
+  margin-bottom: 8px;
+}
 
 /* Loading */
 .items-loading {
