@@ -351,16 +351,20 @@ a:hover { color: #7abfe8; }
 /* Action buttons */
 .item-actions {
   display: flex;
+  flex-direction: column;
   gap: 4px;
-  flex-wrap: wrap;
+}
+.item-actions-row {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 6px;
 }
 .action-btn {
-  flex: 1;
-  min-width: 0;
-  padding: 4px 6px;
+  width: 100%;
+  padding: 5px 8px;
   border: none;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: 10px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -368,6 +372,12 @@ a:hover { color: #7abfe8; }
   gap: 3px;
   transition: opacity 0.15s, background 0.15s;
   white-space: nowrap;
+}
+.item-actions-row .action-btn {
+  width: auto;
+  flex: none;
+  font-size: 11px;
+  padding: 5px 10px;
 }
 .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .action-btn-play { background: #5d9fcf; color: #fff; }
@@ -580,6 +590,73 @@ a:hover { color: #7abfe8; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #3d4046; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+/* ============================================================
+   List View
+   ============================================================ */
+.items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #252c36;
+  border: 1px solid #2e3541;
+  border-radius: 4px;
+  transition: border-color 0.15s;
+}
+.item-row:hover { border-color: #5d9fcf; }
+.item-row.has-theme { border-color: #1e4a2a; }
+.item-row.has-theme:hover { border-color: #27ae60; }
+.item-row.selected {
+  border-color: #5d9fcf !important;
+  box-shadow: 0 0 0 2px rgba(93, 159, 207, 0.35) !important;
+}
+.item-row input[type="checkbox"] {
+  width: 18px; height: 18px;
+  accent-color: #5d9fcf;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.theme-badge-inline {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.item-row-info {
+  flex: 1;
+  min-width: 0;
+}
+.item-row-info .item-title {
+  margin-bottom: 0;
+  font-size: 13px;
+}
+.item-row-info .item-year {
+  margin-bottom: 0;
+}
+
+/* View toggle */
+.view-toggle {
+  display: flex;
+  gap: 2px;
+}
+.view-toggle .btn {
+  font-size: 16px;
+  padding: 3px 8px;
+  line-height: 1;
+}
 
 /* ============================================================
    Responsive

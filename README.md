@@ -4,21 +4,21 @@ Themarr manages Plex theme music for TV shows and movies. It includes a Flask-ba
 
 ## Screenshots
 
-| Welcome | TV Shows library |
+| Welcome | Poster view (grid) |
 |---|---|
-| ![Welcome screen](screenshots/01_welcome.png) | ![TV Shows library](screenshots/02_tv_library.png) |
+| ![Welcome screen](screenshots/01_welcome.png) | ![TV Shows poster view](screenshots/02_tv_library_poster.png) |
 
-| Filter: No Theme | Bulk selection |
+| List view | Filter: No Theme (list) |
 |---|---|
-| ![Filter no theme](screenshots/03_filter_no_theme.png) | ![Bulk select](screenshots/04_bulk_select.png) |
+| ![TV Shows list view](screenshots/03_tv_library_list.png) | ![Filter no theme](screenshots/04_filter_no_theme_list.png) |
 
-| Download modal | Movies library |
+| Bulk select (poster) | Bulk select (list) |
 |---|---|
-| ![Download modal](screenshots/05_download_modal.png) | ![Movies library](screenshots/06_movies_library.png) |
+| ![Bulk select poster view](screenshots/05_bulk_select_poster.png) | ![Bulk select list view](screenshots/07_bulk_select_list.png) |
 
 ## Features
 
-- **Web UI** — Sonarr/Radarr-inspired dark theme, poster thumbnails, in-browser audio playback
+- **Web UI** — Sonarr/Radarr-inspired dark theme, poster thumbnails, in-browser audio playback; toggle between **poster (grid)** and **compact list** views
 - **Multi-select** — select any number of items and bulk-download their themes in one click
 - **Per-item actions** — download from Plex (with preview), upload custom MP3, download from YouTube via `yt-dlp`, delete
 - **Sonarr/Radarr webhooks** — auto-download themes when a new series or movie is added; staggered retry loop until Plex picks up the new item

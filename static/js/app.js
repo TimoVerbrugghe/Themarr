@@ -7,6 +7,7 @@ let currentLibraryId = null;
 let currentItems = [];
 let activeFilter = 'all';
 let activeItemKey = null;
+let currentView = 'grid';
 const selectedItems = new Set();  // ratingKeys of currently selected items
 
 // ============================================================
@@ -113,6 +114,7 @@ async function selectLibrary(id, title) {
 // ============================================================
 function renderItems(items) {
   const grid = document.getElementById('items-grid');
+  grid.className = currentView === 'list' ? 'items-list' : 'items-grid';
   grid.innerHTML = '';
 
   const searchVal = (document.getElementById('search-input').value || '').toLowerCase();
@@ -129,7 +131,7 @@ function renderItems(items) {
     return;
   }
 
-  filtered.forEach((item) => grid.appendChild(createItemCard(item)));
+  filtered.forEach((item) => grid.appendChild(createItem(item)));
 }
 
 function createItemCard(item) {
@@ -200,20 +202,20 @@ function createItemCard(item) {
   const actions = document.createElement('div');
   actions.className = 'item-actions';
 
-  const downloadButton = createActionButton('action-btn action-btn-download', 'Download from Plex', '↓');
+  const downloadButton = createActionButton('action-btn action-btn-download', 'Download from Plex', '↓ Download from Plex');
   downloadButton.disabled = !item.has_plex_theme;
   downloadButton.addEventListener('click', () => openDownloadModal(item.ratingKey, item.title, item.has_local_theme, item.has_plex_theme));
   actions.appendChild(downloadButton);
 
-  const uploadButton = createActionButton('action-btn action-btn-upload', 'Upload theme', '↑');
+  const uploadButton = createActionButton('action-btn action-btn-upload', 'Upload custom theme', '↑ Upload Custom Theme');
   uploadButton.addEventListener('click', () => openUploadModal(item.ratingKey, item.title, item.has_local_theme));
   actions.appendChild(uploadButton);
 
-  const youtubeButton = createActionButton('action-btn action-btn-youtube', 'Download from YouTube', '▶YT');
+  const youtubeButton = createActionButton('action-btn action-btn-youtube', 'Download from YouTube', '▶ Download from YouTube');
   youtubeButton.addEventListener('click', () => openYoutubeModal(item.ratingKey, item.title, item.has_local_theme));
   actions.appendChild(youtubeButton);
 
-  const deleteButton = createActionButton('action-btn action-btn-delete', 'Delete theme', '🗑');
+  const deleteButton = createActionButton('action-btn action-btn-delete', 'Delete theme', '🗑 Delete Theme');
   deleteButton.disabled = !item.has_local_theme;
   deleteButton.addEventListener('click', () => openDeleteModal(item.ratingKey, item.title));
   actions.appendChild(deleteButton);
@@ -236,6 +238,80 @@ function createActionButton(className, title, text) {
 function posterPlaceholder(type, title) {
   const icon = type === 'show' ? '📺' : '🎬';
   return `<div class="poster-placeholder">${icon}<span>${escHtml(title)}</span></div>`;
+}
+
+function createItem(item) {
+  return currentView === 'list' ? createItemRow(item) : createItemCard(item);
+}
+
+function createItemRow(item) {
+  const row = document.createElement('div');
+  const isSelected = selectedItems.has(item.ratingKey);
+  row.className = `item-card item-row${item.has_local_theme ? ' has-theme' : ''}${isSelected ? ' selected' : ''}`;
+  row.id = `card-${item.ratingKey}`;
+
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.checked = isSelected;
+  checkbox.title = 'Select for bulk action';
+  checkbox.addEventListener('change', (e) => {
+    e.stopPropagation();
+    toggleItemSelection(item.ratingKey, e.target.checked, row);
+  });
+  row.appendChild(checkbox);
+
+  const badge = document.createElement('div');
+  badge.className = `theme-badge-inline ${item.has_local_theme ? 'theme-badge-has' : 'theme-badge-none'}`;
+  badge.title = item.has_local_theme ? 'Has theme' : 'No theme';
+  badge.textContent = item.has_local_theme ? '🎵' : '○';
+  row.appendChild(badge);
+
+  const info = document.createElement('div');
+  info.className = 'item-row-info';
+  const titleEl = document.createElement('div');
+  titleEl.className = 'item-title';
+  titleEl.title = item.title;
+  titleEl.textContent = item.title;
+  const yearEl = document.createElement('div');
+  yearEl.className = 'item-year';
+  yearEl.textContent = item.year || '';
+  info.appendChild(titleEl);
+  info.appendChild(yearEl);
+  row.appendChild(info);
+
+  const actions = document.createElement('div');
+  actions.className = 'item-actions item-actions-row';
+
+  const downloadButton = createActionButton('action-btn action-btn-download', 'Download from Plex', '↓ Download from Plex');
+  downloadButton.disabled = !item.has_plex_theme;
+  downloadButton.addEventListener('click', () => openDownloadModal(item.ratingKey, item.title, item.has_local_theme, item.has_plex_theme));
+  actions.appendChild(downloadButton);
+
+  const uploadButton = createActionButton('action-btn action-btn-upload', 'Upload custom theme', '↑ Upload Custom Theme');
+  uploadButton.addEventListener('click', () => openUploadModal(item.ratingKey, item.title, item.has_local_theme));
+  actions.appendChild(uploadButton);
+
+  const youtubeButton = createActionButton('action-btn action-btn-youtube', 'Download from YouTube', '▶ Download from YouTube');
+  youtubeButton.addEventListener('click', () => openYoutubeModal(item.ratingKey, item.title, item.has_local_theme));
+  actions.appendChild(youtubeButton);
+
+  const deleteButton = createActionButton('action-btn action-btn-delete', 'Delete theme', '🗑 Delete Theme');
+  deleteButton.disabled = !item.has_local_theme;
+  deleteButton.addEventListener('click', () => openDeleteModal(item.ratingKey, item.title));
+  actions.appendChild(deleteButton);
+
+  row.appendChild(actions);
+  return row;
+}
+
+// ============================================================
+// View toggle
+// ============================================================
+function setView(mode) {
+  currentView = mode;
+  document.getElementById('view-btn-grid').classList.toggle('active', mode === 'grid');
+  document.getElementById('view-btn-list').classList.toggle('active', mode === 'list');
+  renderItems(currentItems);
 }
 
 function updateStats(items) {
@@ -569,7 +645,7 @@ async function refreshItem(ratingKey) {
     if (updated) {
       const card = document.getElementById(`card-${ratingKey}`);
       if (card) {
-        card.replaceWith(createItemCard(updated));
+        card.replaceWith(createItem(updated));
       }
     }
     updateStats(items);
