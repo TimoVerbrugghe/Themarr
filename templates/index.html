@@ -4,7 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Themarr</title>
+  <meta name="theme-color" content="#00CFFF">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Themarr">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v={{ asset_version }}">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.json">
   <link rel="stylesheet" href="/static/css/style.css?v={{ asset_version }}">
 </head>
 <body>
@@ -555,6 +561,14 @@
   <div id="toast-container" class="toast-container"></div>
 
   <script src="/static/js/app.js?v={{ asset_version }}"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('/static/js/sw.js')
+          .catch(function(err) { console.error('Service worker registration failed:', err); });
+      });
+    }
+  </script>
   {% endif %}
 </body>
 </html>
