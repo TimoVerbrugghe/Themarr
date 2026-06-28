@@ -563,7 +563,10 @@
   <script src="/static/js/app.js?v={{ asset_version }}"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/static/js/sw.js');
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('/static/js/sw.js')
+          .catch(function(err) { console.error('Service worker registration failed:', err); });
+      });
     }
   </script>
   {% endif %}
