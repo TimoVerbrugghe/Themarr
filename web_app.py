@@ -112,12 +112,19 @@ _poster_warmup_future = None
 _startup_warmup_started = False
 _startup_warmup_lock = threading.Lock()
 _generated_api_key = secrets.token_urlsafe(32)
-if not (os.getenv('API_KEY') or '').strip():
+
+
+def _log_generated_api_key_warning():
+    """Warn when using an auto-generated API key without logging the secret."""
     logger.warning(
         'API_KEY is not set; a one-time startup API key was generated. '
-        'Find it by running: docker logs <container> 2>&1 | grep "startup API key"',
+        'Open the Settings page in the web app after signing in to view it, '
+        'or set API_KEY to a stable value to avoid rotation on restart.',
     )
-    logger.warning('API_KEY startup API key: %s', _generated_api_key)
+
+
+if not (os.getenv('API_KEY') or '').strip():
+    _log_generated_api_key_warning()
 
 
 def _auth_disabled():

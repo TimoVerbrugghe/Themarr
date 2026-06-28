@@ -157,6 +157,17 @@ class TestCachedThemeStateSync:
 
 
 class TestSettingsRuntime:
+    def test_generated_api_key_warning_does_not_log_secret(self):
+        import web_app
+        with patch.object(web_app.logger, 'warning') as mock_warning:
+            web_app._log_generated_api_key_warning()
+
+        mock_warning.assert_called_once_with(
+            'API_KEY is not set; a one-time startup API key was generated. '
+            'Open the Settings page in the web app after signing in to view it, '
+            'or set API_KEY to a stable value to avoid rotation on restart.',
+        )
+
     def test_runtime_settings_requires_authentication(self, app):
         unauthenticated_client = app.test_client()
         resp = unauthenticated_client.get('/api/settings/runtime')
