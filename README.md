@@ -91,7 +91,7 @@ volumes:
 | `AUTH_USERNAME` | No | — | Username for the login screen. Set together with `AUTH_PASSWORD` when `DISABLE_AUTH=false`. |
 | `AUTH_PASSWORD` | No | — | Password for the login screen (used with `AUTH_USERNAME` when `DISABLE_AUTH=false`). |
 | `DISABLE_AUTH` | No | `false` | Set to `true` to disable all UI authentication. Only use this when a trusted reverse proxy already handles auth (see [Disable auth](#disable-auth-reverse-proxy)). |
-| `API_AUTH_TOKEN` | No | auto-generated | Token for programmatic/webhook API access. If unset, Themarr generates one at startup and logs it. |
+| `API_KEY` | No | auto-generated | API key for programmatic/webhook access. If unset, Themarr generates one at startup and logs it. |
 | `FLASK_SECRET_KEY` | No | auto-generated | Secret used to sign the browser session cookie. Set a stable value to keep sessions across container restarts. |
 | `WEBHOOK_USERNAME` | No | — | Optional Basic Auth username for Plex webhook endpoint |
 | `WEBHOOK_PASSWORD` | No | — | Optional Basic Auth password for Plex webhook endpoint |
@@ -102,7 +102,7 @@ volumes:
 
 ## Authentication
 
-Themarr has two Web UI authentication modes plus always-on API token support:
+Themarr has two Web UI authentication modes plus always-on API key support:
 
 ### Credentials (recommended)
 
@@ -118,13 +118,13 @@ AUTH_PASSWORD=yourpassword
 
 If `DISABLE_AUTH=false` and either `AUTH_USERNAME` or `AUTH_PASSWORD` is missing, the Web UI only shows a warning page until both are set.
 
-### API token (automation)
+### API key (automation)
 
-`API_AUTH_TOKEN` is independent from UI auth mode and is intended for scripts, API clients, and webhook callers.
-If `API_AUTH_TOKEN` is not set, Themarr generates a token at startup and logs it:
+`API_KEY` is independent from UI auth mode and is intended for scripts, API clients, and webhook callers.
+If `API_KEY` is not set, Themarr generates an API key at startup and logs it:
 
 ```bash
-docker logs <container> 2>&1 | grep "startup token"
+docker logs <container> 2>&1 | grep "startup API key"
 ```
 
 ### Disable auth (reverse-proxy)
@@ -136,7 +136,7 @@ Use this **only** when a trusted reverse proxy (e.g. Authelia, Authentik, nginx 
 DISABLE_AUTH=true
 ```
 
-> **Note:** `API_AUTH_TOKEN` is still used for programmatic API access (webhooks, API clients) regardless of the UI auth mode.
+> **Note:** `API_KEY` is still used for programmatic API access (webhooks, API clients) regardless of the UI auth mode.
 
 
 
@@ -176,11 +176,11 @@ Themarr can process Plex webhook events for newly added library items.
 
 All mutating API routes require either:
 
-- `X-Themarr-Api-Key: <token>` or
-- `Authorization: Bearer <token>` or
+- `X-Themarr-Api-Key: <api-key>` or
+- `Authorization: Bearer <api-key>` or
 - a valid browser session (established via the login screen)
 
-This applies regardless of `DISABLE_AUTH`. Even when UI auth is disabled, programmatic API callers (e.g. Sonarr/Radarr webhooks) must still send the API token.
+This applies regardless of `DISABLE_AUTH`. Even when UI auth is disabled, programmatic API callers (e.g. Sonarr/Radarr webhooks) must still send the API key.
 
 ## Screenshots
 

@@ -17,7 +17,7 @@
       <h2 class="login-title">Web UI authentication is not configured</h2>
       <p class="text-muted">{{ ui_auth_warning_message }}</p>
       <div class="settings-action-result success" style="display:block; margin-top:1rem;">
-        API token creation and API token-based automation remain available via <code>API_AUTH_TOKEN</code>.
+        API key generation and API key-based automation remain available via <code>API_KEY</code>.
       </div>
     </div>
   </div>
@@ -221,11 +221,11 @@
           <table class="settings-envtable">
             <tbody>
               <tr>
-                <td><strong>API auth token</strong></td>
+                <td><strong>API key</strong></td>
                 <td colspan="2">
-                  <code id="runtime-api-token">Loading…</code>
-                  <button class="btn btn-secondary btn-sm" type="button" onclick="copyApiToken()">Copy</button>
-                  <div id="runtime-api-token-source">Loading…</div>
+                  <code id="runtime-api-key">Loading…</code>
+                  <button class="btn btn-secondary btn-sm" type="button" onclick="copyApiKey()">Copy</button>
+                  <div id="runtime-api-key-source">Loading…</div>
                   <div style="margin-top:0.5rem;">
                     <button class="btn btn-secondary btn-sm" type="button" onclick="logoutSession()">Logout</button>
                   </div>
@@ -265,7 +265,7 @@
               <tr><td><code>DEFAULT_THEME</code></td><td><code>dark</code></td><td>Initial colour theme (<code>dark</code> or <code>light</code>). Users can override this in-browser.</td></tr>
               <tr><td><code>DEFAULT_VIEW</code></td><td><code>list</code></td><td>Initial library view (<code>list</code> or <code>grid</code>). Users can override this in-browser via the view-toggle buttons.</td></tr>
               <tr><td><code>FLASK_DEBUG</code></td><td><code>false</code></td><td>Enable Flask debug mode. Do not use in production.</td></tr>
-              <tr><td><code>API_AUTH_TOKEN</code></td><td><code>auto-generated</code></td><td>API token used for all mutating API routes. If unset, Themarr generates a startup token and shows it above.</td></tr>
+              <tr><td><code>API_KEY</code></td><td><code>auto-generated</code></td><td>API key used for all mutating API routes. If unset, Themarr generates a startup API key and shows it above.</td></tr>
               <tr class="settings-envtable-group"><td colspan="3">Notifications (optional)</td></tr>
               <tr><td><code>PUSHOVER_APP_TOKEN</code></td><td>—</td><td>Pushover application token. Leave blank to disable push notifications.</td></tr>
               <tr><td><code>PUSHOVER_USER_KEY</code></td><td>—</td><td>Pushover user/group key. Leave blank to disable push notifications.</td></tr>

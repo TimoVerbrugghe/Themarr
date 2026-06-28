@@ -44,28 +44,28 @@ let activePlayBtn = null; // button element that triggered playback
 const STARTUP_POLL_INTERVAL_MS = 1500;
 let lastCompactActionMenuMode = null;
 const ACTION_MENU_COLLAPSE_BREAKPOINT = 1200;
-// API token is kept in memory only; it is never written to localStorage.
+// API key is kept in memory only; it is never written to localStorage.
 // The server returns it from the authenticated GET /api/settings/runtime endpoint.
-let apiAuthToken = '';
+let apiKey = '';
 // Auth mode reported by /api/init: 'disabled' | 'credentials' | 'misconfigured'
 let appAuthMode = 'misconfigured';
 const NOT_AUTHENTICATED_TEXT = 'Not authenticated';
-// Remove any token previously stored in localStorage by older versions of this app.
+// Remove any API key previously stored in localStorage by older versions of this app.
 try { localStorage.removeItem('themarr-api-token'); } catch (_) { /* ignore */ }
 
 function makeLibraryCacheKey(provider, libraryId) {
   return `${provider}:${libraryId}`;
 }
 
-function copyApiToken() {
-  const token = apiAuthToken || '';
-  if (!token) {
-    showSettingsResult(false, '✗ Not logged in — paste the token from the server logs and click Login first');
+function copyApiKey() {
+  const key = apiKey || '';
+  if (!key) {
+    showSettingsResult(false, '✗ Not logged in — paste the API key from the server logs and click Login first');
     return;
   }
-  navigator.clipboard.writeText(token)
-    .then(() => showSettingsResult(true, '✓ API token copied to clipboard'))
-    .catch((err) => showSettingsResult(false, `✗ Failed to copy token: ${err}`));
+  navigator.clipboard.writeText(key)
+    .then(() => showSettingsResult(true, '✓ API key copied to clipboard'))
+    .catch((err) => showSettingsResult(false, `✗ Failed to copy API key: ${err}`));
 }
 
 // ============================================================
@@ -135,23 +135,23 @@ async function loginWithCredentials(event) {
 
 /** Called after successful login to resume the startup flow. */
 async function postLoginInit() {
-  await refreshApiAuthToken();
+  await refreshApiKey();
   await waitForStartupHydration();
   loadLibraries();
 }
 
 // ============================================================
-// Settings page auth actions (inline token login / logout)
+// Settings page auth actions (inline API key login / logout)
 // ============================================================
 
 async function logoutSession() {
   try {
     await fetch('/api/auth/logout', { method: 'POST' });
   } catch (_) { /* ignore network errors on logout */ }
-  apiAuthToken = '';
-  const tokenEl = document.getElementById('runtime-api-token');
-  const sourceEl = document.getElementById('runtime-api-token-source');
-  if (tokenEl) tokenEl.textContent = NOT_AUTHENTICATED_TEXT;
+  apiKey = '';
+  const keyEl = document.getElementById('runtime-api-key');
+  const sourceEl = document.getElementById('runtime-api-key-source');
+  if (keyEl) keyEl.textContent = NOT_AUTHENTICATED_TEXT;
   if (sourceEl) sourceEl.textContent = NOT_AUTHENTICATED_TEXT;
   showSettingsResult(true, '✓ Logged out');
   // If auth is required, redirect back to login overlay
@@ -163,36 +163,36 @@ async function logoutSession() {
 async function loadSettingsRuntime() {
   try {
     const data = await apiGet('/api/settings/runtime');
-    // Store token in memory so header-based API calls keep working
-    if (data.api_auth_token) apiAuthToken = data.api_auth_token;
-    const tokenEl = document.getElementById('runtime-api-token');
-    const sourceEl = document.getElementById('runtime-api-token-source');
+    // Store API key in memory so header-based API calls keep working
+    if (data.api_key) apiKey = data.api_key;
+    const keyEl = document.getElementById('runtime-api-key');
+    const sourceEl = document.getElementById('runtime-api-key-source');
     const workersEl = document.getElementById('runtime-worker-count');
     const pageSizeEl = document.getElementById('runtime-library-page-size');
     const pageMaxEl = document.getElementById('runtime-library-page-max');
     const posterCacheEl = document.getElementById('runtime-poster-cache-max');
-    if (tokenEl) tokenEl.textContent = data.api_auth_token ? '••••••••' + data.api_auth_token.slice(-4) : 'Not configured';
+    if (keyEl) keyEl.textContent = data.api_key ? '••••••••' + data.api_key.slice(-4) : 'Not configured';
     if (sourceEl) {
-      sourceEl.textContent = data.api_auth_token_configured ? 'from API_AUTH_TOKEN env variable' : 'auto-generated at startup';
+      sourceEl.textContent = data.api_key_configured ? 'from API_KEY env variable' : 'auto-generated at startup';
     }
     if (workersEl) workersEl.textContent = String(data.background_worker_count);
     if (pageSizeEl) pageSizeEl.textContent = String(data.library_page_size);
     if (pageMaxEl) pageMaxEl.textContent = String(data.library_page_size_max);
     if (posterCacheEl) posterCacheEl.textContent = String(data.poster_cache_max_items);
   } catch (err) {
-    const tokenEl = document.getElementById('runtime-api-token');
-    const sourceEl = document.getElementById('runtime-api-token-source');
-    if (tokenEl) tokenEl.textContent = NOT_AUTHENTICATED_TEXT;
+    const keyEl = document.getElementById('runtime-api-key');
+    const sourceEl = document.getElementById('runtime-api-key-source');
+    if (keyEl) keyEl.textContent = NOT_AUTHENTICATED_TEXT;
     if (sourceEl) sourceEl.textContent = NOT_AUTHENTICATED_TEXT;
   }
 }
 
-async function refreshApiAuthToken() {
-  // Try to retrieve token from an existing session; silently ignore 401
-  // (user will need to enter the token via the settings page login form).
+async function refreshApiKey() {
+  // Try to retrieve the API key from an existing session; silently ignore 401
+  // (user will need to enter the API key via the settings page login form).
   try {
     const data = await apiGet('/api/settings/runtime');
-    if (data.api_auth_token) apiAuthToken = data.api_auth_token;
+    if (data.api_key) apiKey = data.api_key;
   } catch (_) { /* not yet authenticated — ignore */ }
 }
 
@@ -332,9 +332,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Already authenticated (or auth disabled) — proceed with normal startup.
   try {
-    await refreshApiAuthToken();
+    await refreshApiKey();
   } catch (err) {
-    console.error('Failed to load API auth token', err);
+    console.error('Failed to load API key', err);
   }
   await waitForStartupHydration();
   loadLibraries();
@@ -2080,7 +2080,7 @@ async function apiFormPost(url, formData) {
 
 function buildApiHeaders(extraHeaders = {}) {
   const headers = { ...extraHeaders };
-  if (apiAuthToken) headers['X-Themarr-Api-Key'] = apiAuthToken;
+  if (apiKey) headers['X-Themarr-Api-Key'] = apiKey;
   return headers;
 }
 

@@ -66,7 +66,7 @@ LIBRARY_PAGE_SIZE_MAX_VALUE = LIBRARY_PAGE_SIZE_MAX
 app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
 # Flask session: use env-provided key for cross-restart persistence, otherwise
 # generate one per process (sessions invalidate on restart – acceptable for a
-# home-server app where the API token also rotates on restart when auto-generated).
+# home-server app where the API key also rotates on restart when auto-generated).
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY') or secrets.token_hex(32)
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
@@ -111,13 +111,13 @@ _cache_warmup_future = None
 _poster_warmup_future = None
 _startup_warmup_started = False
 _startup_warmup_lock = threading.Lock()
-_generated_api_auth_token = secrets.token_urlsafe(32)
-if not (os.getenv('API_AUTH_TOKEN') or '').strip():
+_generated_api_key = secrets.token_urlsafe(32)
+if not (os.getenv('API_KEY') or '').strip():
     logger.warning(
-        'API_AUTH_TOKEN is not set; a one-time startup token was generated. '
-        'Find it by running: docker logs <container> 2>&1 | grep "startup token"',
+        'API_KEY is not set; a one-time startup API key was generated. '
+        'Find it by running: docker logs <container> 2>&1 | grep "startup API key"',
     )
-    logger.warning('API_AUTH_TOKEN startup token: %s', _generated_api_auth_token)
+    logger.warning('API_KEY startup API key: %s', _generated_api_key)
 
 
 def _auth_disabled():
@@ -188,39 +188,39 @@ def error_response(message, status_code=500, exc=None):
     return jsonify({'error': message}), status_code
 
 
-def _parse_auth_token():
-    """Extract API token from supported auth headers."""
-    header_token = (request.headers.get('X-Themarr-Api-Key') or '').strip()
-    if header_token:
-        return header_token
+def _parse_api_key():
+    """Extract API key from supported auth headers."""
+    header_key = (request.headers.get('X-Themarr-Api-Key') or '').strip()
+    if header_key:
+        return header_key
     auth_header = (request.headers.get('Authorization') or '').strip()
     if auth_header.startswith('Bearer '):
         return auth_header[7:].strip()
     return ''
 
 
-def _get_api_auth_token():
-    """Return configured API token or generated fallback token."""
-    configured_token = (os.getenv('API_AUTH_TOKEN') or '').strip()
-    if configured_token:
-        return configured_token, False
-    return _generated_api_auth_token, True
+def _get_api_key():
+    """Return configured API key or generated fallback key."""
+    configured_key = (os.getenv('API_KEY') or '').strip()
+    if configured_key:
+        return configured_key, False
+    return _generated_api_key, True
 
 
 def _check_api_request_auth():
-    """Validate API auth token for protected API routes.
+    """Validate API key auth for protected API routes.
 
     Accepts either a valid Flask session (established via POST /api/auth/login)
-    or the API token supplied in the X-Themarr-Api-Key / Authorization header.
+    or the API key supplied in the X-Themarr-Api-Key / Authorization header.
     When DISABLE_AUTH=true, all requests are allowed without credentials.
     """
     if _auth_disabled():
         return None
     if session.get('authenticated'):
         return None
-    expected_token, _ = _get_api_auth_token()
-    provided_token = _parse_auth_token()
-    if provided_token and hmac.compare_digest(provided_token, expected_token):
+    expected_key, _ = _get_api_key()
+    provided_key = _parse_api_key()
+    if provided_key and hmac.compare_digest(provided_key, expected_key):
         return None
     return jsonify({'error': 'Unauthorized API request'}), 401
 
@@ -1430,15 +1430,15 @@ def api_init():
 def get_settings_runtime():
     """Return runtime settings for the UI settings page.
 
-    This endpoint requires authentication (session cookie or API token header).
-    The actual API token is returned so the settings page can display it; it is
+    This endpoint requires authentication (session cookie or API key header).
+    The actual API key is returned so the settings page can display it; it is
     safe to do so because the caller is already authenticated.
     """
-    actual_token, is_generated = _get_api_auth_token()
+    actual_key, is_generated = _get_api_key()
     return jsonify({
-        'api_auth_token': actual_token,
-        'api_auth_token_configured': not is_generated,
-        'api_auth_token_generated': is_generated,
+        'api_key': actual_key,
+        'api_key_configured': not is_generated,
+        'api_key_generated': is_generated,
         'background_worker_count': BACKGROUND_WORKER_COUNT,
         'library_page_size': LIBRARY_PAGE_SIZE,
         'library_page_size_max': LIBRARY_PAGE_SIZE_MAX_VALUE,
@@ -1448,7 +1448,7 @@ def get_settings_runtime():
 
 @app.before_request
 def enforce_api_auth():
-    """Protect API endpoints with token or session auth."""
+    """Protect API endpoints with API key or session auth."""
     _ensure_startup_warmup()
     if not request.path.startswith('/api/'):
         return None
@@ -1458,7 +1458,7 @@ def enforce_api_auth():
         return None  # Webhook uses its own Basic Auth
     if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
         return _check_api_request_auth()
-    # Also protect the settings/runtime GET since it now returns the token
+    # Also protect the settings/runtime GET since it now returns the API key
     if request.path == '/api/settings/runtime':
         return _check_api_request_auth()
     return None

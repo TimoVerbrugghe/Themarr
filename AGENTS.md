@@ -52,7 +52,7 @@ Primary environment variables are defined in `.env.example`:
 - `FLASK_DEBUG` — Flask debug mode (never enable in production)
 - `DEFAULT_THEME` — default UI theme: `dark` or `light`
 - `DEFAULT_VIEW` — default library view: `list` or `grid`
-- `API_AUTH_TOKEN` — bearer token protecting mutating API endpoints; auto-generated and logged at startup when not set
+- `API_KEY` — API key protecting mutating API endpoints; auto-generated and logged at startup when not set
 - `PUSHOVER_APP_TOKEN`, `PUSHOVER_USER_KEY` — optional Pushover notifications
 - `WEBHOOK_USERNAME`, `WEBHOOK_PASSWORD` — optional webhook Basic Auth (both must be set)
 - `PLEX_RETRY_ATTEMPTS`, `PLEX_RETRY_DELAY` — webhook retry tuning
@@ -82,7 +82,7 @@ Primary environment variables are defined in `.env.example`:
 
 ## Security Notes
 
-- **API auth token**: `GET /api/settings/runtime` is an **authenticated** endpoint — it requires a valid session cookie or API token header and returns the actual token in the response. The token is never written to `localStorage`. Users log in via the Settings page; the server sets an httpOnly session cookie (`POST /api/auth/login`). The token is kept in JS memory (`apiAuthToken`) for the lifetime of the tab.
+- **API key**: `GET /api/settings/runtime` is an **authenticated** endpoint — it requires a valid session cookie or API key header and returns the actual key in the response. The key is never written to `localStorage`. Users log in via the Settings page; the server sets an httpOnly session cookie (`POST /api/auth/login`). The key is kept in JS memory (`apiKey`) for the lifetime of the tab.
 - **Media root validation**: `TV_SHOWS_HOST_PATH` / `MOVIES_HOST_PATH` are security controls — set them to constrain filesystem write operations to known library directories.
 - **yt-dlp**: `remote_components` must NOT be enabled (supply-chain risk — fetches and executes JS from GitHub at runtime).
 - **ThemerrDB URLs**: always validate with `is_valid_youtube_url()` before passing to yt-dlp.

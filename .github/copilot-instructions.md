@@ -85,9 +85,8 @@ use CI behavior instead of local screenshot commits:
 | `.github/workflows/screenshots.yml` | CI workflow — screenshot artifacts on UI PRs; auto-updates on main |
 | `.github/workflows/sanitize-screenshot-changes.yml` | CI workflow — auto-removes direct screenshots/ changes in branches/PRs |
 
-## API auth token
+## API key
 
-The API auth token is **not** returned by the unauthenticated `GET /api/settings/runtime`
-endpoint. It is stored by the browser in `localStorage` after the user pastes it
-into the settings page. When `API_AUTH_TOKEN` is not set, the auto-generated startup
-token is printed to the container log at startup.
+The API key is **not** returned by the unauthenticated `GET /api/settings/runtime`
+endpoint. It stays in JS memory for the lifetime of the tab. When `API_KEY`
+is not set, the auto-generated startup API key is printed to the container log at startup.
