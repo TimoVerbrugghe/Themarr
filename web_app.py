@@ -471,7 +471,7 @@ def query_themerrdb(item_type, database, external_id):
     
     try:
         url = f'{THEMERRDB_API_BASE}/{item_type}/{database}/{external_id}.json'
-        logger.debug('Querying ThemerrDB for item_type=%s database=%s', item_type, database)
+        logger.debug('Querying ThemerrDB for theme availability')
         response = http_requests.get(url, timeout=10)
         
         if response.status_code == 200:
@@ -479,14 +479,14 @@ def query_themerrdb(item_type, database, external_id):
             _set_cached_themerrdb(external_id, data)
             return data
         elif response.status_code == 404:
-            logger.debug('Theme not found in ThemerrDB for item_type=%s database=%s', item_type, database)
+            logger.debug('Theme not found in ThemerrDB')
             _set_cached_themerrdb(external_id, None)
             return None
         else:
-            logger.warning('ThemerrDB query failed with status %s for item_type=%s database=%s', response.status_code, item_type, database)
+            logger.warning('ThemerrDB query failed with status %s', response.status_code)
             return None
     except Exception as exc:
-        logger.error(f'Error querying ThemerrDB: {exc}')
+        logger.error('Error querying ThemerrDB: %s', type(exc).__name__)
         return None
 
 
