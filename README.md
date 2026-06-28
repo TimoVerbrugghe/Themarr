@@ -149,3 +149,7 @@ Themarr can process Plex webhook events for newly added library items.
 | Plex download |
 |---|
 | ![Plex download light](screenshots/10_plex_download_light.png) |
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
