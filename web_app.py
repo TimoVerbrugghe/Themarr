@@ -471,7 +471,7 @@ def query_themerrdb(item_type, database, external_id):
     
     try:
         url = f'{THEMERRDB_API_BASE}/{item_type}/{database}/{external_id}.json'
-        logger.debug('Querying ThemerrDB item URL: %s', url)
+        logger.debug('Querying ThemerrDB for item_type=%s database=%s', item_type, database)
         response = http_requests.get(url, timeout=10)
         
         if response.status_code == 200:
@@ -479,11 +479,11 @@ def query_themerrdb(item_type, database, external_id):
             _set_cached_themerrdb(external_id, data)
             return data
         elif response.status_code == 404:
-            logger.debug('Theme not found in ThemerrDB for URL: %s', url)
+            logger.debug('Theme not found in ThemerrDB for item_type=%s database=%s', item_type, database)
             _set_cached_themerrdb(external_id, None)
             return None
         else:
-            logger.warning(f'ThemerrDB query failed with status {response.status_code}: {url}')
+            logger.warning('ThemerrDB query failed with status %s for item_type=%s database=%s', response.status_code, item_type, database)
             return None
     except Exception as exc:
         logger.error(f'Error querying ThemerrDB: {exc}')
@@ -567,7 +567,8 @@ def _check_plex_preview_availability(item):
         response.close()
         return {'available': True}
     except Exception as exc:
-        return {'available': False, 'reason': f'Unable to stream the Plex preview: {exc}'}
+        logger.warning('Unable to stream Plex preview for item %s: %s', getattr(item, 'ratingKey', '?'), exc)
+        return {'available': False, 'reason': 'Unable to stream the Plex preview right now.'}
 
 
 def scan_local_theme_dirs(base_paths):
@@ -1791,7 +1792,7 @@ def check_themerrdb_availability(rating_key):
         return jsonify(_check_themerrdb_availability_for_context(context, validate_preview=True))
     except http_requests.exceptions.RequestException as exc:
         logger.warning('Failed to check ThemerrDB availability for Plex item %s: %s', rating_key, exc)
-        return jsonify({'available': False, 'reason': f'Could not reach provider metadata ({exc})'})
+        return jsonify({'available': False, 'reason': 'Could not reach provider metadata.'})
     except Exception as exc:
         return error_response(f'Failed to check ThemerrDB availability for {rating_key}', exc=exc)
 
@@ -1934,7 +1935,7 @@ def check_provider_theme_preview(provider, item_id):
         return jsonify(_check_plex_preview_availability(context['item']))
     except http_requests.exceptions.RequestException as exc:
         logger.warning('Failed to check preview availability for %s item %s: %s', provider, item_id, exc)
-        return jsonify({'available': False, 'reason': f'Could not reach provider to validate preview ({exc})'})
+        return jsonify({'available': False, 'reason': 'Could not reach provider to validate preview.'})
     except ValueError as exc:
         return error_response('Invalid provider or item identifier', status_code=400, exc=exc)
     except Exception as exc:
@@ -1966,7 +1967,7 @@ def check_provider_themerrdb_availability(provider, item_id):
         return jsonify(_check_themerrdb_availability_for_context(context, validate_preview=True))
     except http_requests.exceptions.RequestException as exc:
         logger.warning('Failed to check ThemerrDB availability for %s item %s: %s', provider, item_id, exc)
-        return jsonify({'available': False, 'reason': f'Could not reach provider metadata ({exc})'})
+        return jsonify({'available': False, 'reason': 'Could not reach provider metadata.'})
     except ValueError as exc:
         return error_response('Invalid provider or item identifier', status_code=400, exc=exc)
     except Exception as exc:
