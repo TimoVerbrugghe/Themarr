@@ -157,12 +157,17 @@ class TestCachedThemeStateSync:
 
 
 class TestSettingsRuntime:
+    def test_runtime_settings_requires_authentication(self, app):
+        unauthenticated_client = app.test_client()
+        resp = unauthenticated_client.get('/api/settings/runtime')
+        assert resp.status_code == 401
+
     def test_runtime_settings_returns_generated_token_when_env_missing(self, client):
         with patch.dict(os.environ, {'API_AUTH_TOKEN': ''}, clear=False):
             resp = client.get('/api/settings/runtime')
         assert resp.status_code == 200
         data = resp.get_json()
-        assert 'api_auth_token' not in data
+        assert 'api_auth_token' in data
         assert data['api_auth_token_configured'] is False
         assert data['api_auth_token_generated'] is True
         assert data['background_worker_count'] == 4
@@ -170,14 +175,75 @@ class TestSettingsRuntime:
         assert data['library_page_size_max'] == 500
         assert data['poster_cache_max_items'] == 500
 
-    def test_runtime_settings_prefers_configured_token(self, client):
+    def test_runtime_settings_prefers_configured_token(self, app):
         with patch.dict(os.environ, {'API_AUTH_TOKEN': 'configured-token'}, clear=False):
-            resp = client.get('/api/settings/runtime')
+            with app.test_client() as c:
+                resp = c.get('/api/settings/runtime', headers={'X-Themarr-Api-Key': 'configured-token'})
         assert resp.status_code == 200
         data = resp.get_json()
-        assert 'api_auth_token' not in data
+        assert data['api_auth_token'] == 'configured-token'
         assert data['api_auth_token_configured'] is True
         assert data['api_auth_token_generated'] is False
+
+    def test_runtime_settings_accessible_via_session(self, app):
+        import web_app
+        with patch.dict(os.environ, {'API_AUTH_TOKEN': 'sess-token'}):
+            with app.test_client() as session_client:
+                login_resp = session_client.post(
+                    '/api/auth/login',
+                    json={'token': 'sess-token'},
+                    content_type='application/json',
+                )
+                assert login_resp.status_code == 200
+                resp = session_client.get('/api/settings/runtime')
+        assert resp.status_code == 200
+        assert resp.get_json()['api_auth_token'] == 'sess-token'
+
+
+class TestAuthLogin:
+    def test_login_with_valid_token_returns_200(self, app):
+        with patch.dict(os.environ, {'API_AUTH_TOKEN': 'my-token'}):
+            with app.test_client() as c:
+                resp = c.post('/api/auth/login', json={'token': 'my-token'})
+        assert resp.status_code == 200
+        assert resp.get_json()['ok'] is True
+
+    def test_login_with_invalid_token_returns_401(self, app):
+        with patch.dict(os.environ, {'API_AUTH_TOKEN': 'correct-token'}):
+            with app.test_client() as c:
+                resp = c.post('/api/auth/login', json={'token': 'wrong-token'})
+        assert resp.status_code == 401
+
+    def test_login_with_empty_token_returns_401(self, app):
+        with app.test_client() as c:
+            resp = c.post('/api/auth/login', json={'token': ''})
+        assert resp.status_code == 401
+
+    def test_login_with_missing_body_returns_401(self, app):
+        with app.test_client() as c:
+            resp = c.post('/api/auth/login')
+        assert resp.status_code == 401
+
+    def test_login_sets_session_that_authenticates_runtime_endpoint(self, app):
+        with patch.dict(os.environ, {'API_AUTH_TOKEN': 'sess-test-token'}):
+            with app.test_client() as c:
+                c.post('/api/auth/login', json={'token': 'sess-test-token'})
+                resp = c.get('/api/settings/runtime')
+        assert resp.status_code == 200
+
+
+class TestAuthLogout:
+    def test_logout_clears_session(self, app):
+        with patch.dict(os.environ, {'API_AUTH_TOKEN': 'logout-token'}):
+            with app.test_client() as c:
+                c.post('/api/auth/login', json={'token': 'logout-token'})
+                # Confirm authenticated
+                assert c.get('/api/settings/runtime').status_code == 200
+                # Logout
+                logout_resp = c.post('/api/auth/logout')
+                assert logout_resp.status_code == 200
+                # Should now be unauthenticated
+                assert c.get('/api/settings/runtime').status_code == 401
 
 
 class TestLibraries:
@@ -1525,3 +1591,8 @@ class TestApiAuth:
              patch('web_app._kick_off_cache_warmup', return_value=True):
             resp = client.post('/api/settings/refresh-cache', headers={'X-Themarr-Api-Key': 'secret-token'})
         assert resp.status_code == 200
+
+    def test_settings_runtime_requires_auth(self, app):
+        unauthenticated_client = app.test_client()
+        resp = unauthenticated_client.get('/api/settings/runtime')
+        assert resp.status_code == 401

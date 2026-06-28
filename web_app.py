@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 
 import requests as http_requests
 import yt_dlp
-from flask import Flask, Response, jsonify, render_template, request, send_file
+from flask import Flask, Response, jsonify, render_template, request, send_file, session
 
 from app.media_utils import (
     MAX_UPLOAD_BYTES, ALLOWED_UPLOAD_TYPES, VIDEO_FILE_EXTENSIONS,
@@ -64,6 +64,18 @@ BACKGROUND_WORKER_COUNT = BACKGROUND_WORKER_COUNT_DEFAULT
 LIBRARY_PAGE_SIZE = LIBRARY_PAGE_SIZE_DEFAULT
 LIBRARY_PAGE_SIZE_MAX_VALUE = LIBRARY_PAGE_SIZE_MAX
 app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
+# Flask session: use env-provided key for cross-restart persistence, otherwise
+# generate one per process (sessions invalidate on restart – acceptable for a
+# home-server app where the API token also rotates on restart when auto-generated).
+app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY') or secrets.token_hex(32)
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+if not os.getenv('FLASK_SECRET_KEY'):
+    logger.warning(
+        'FLASK_SECRET_KEY is not set; a one-time session key was generated. '
+        'Browser sessions will be invalidated on every container restart. '
+        'Set FLASK_SECRET_KEY to a stable random value for persistent sessions.'
+    )
 
 # Allowed CDN hosts for yt-dlp resolved audio stream proxying (SSRF guard).
 # yt-dlp returns googlevideo.com URLs for YouTube streams under normal operation.
@@ -136,7 +148,13 @@ def _get_api_auth_token():
 
 
 def _check_api_request_auth():
-    """Validate API auth token for mutating API routes."""
+    """Validate API auth token for protected API routes.
+
+    Accepts either a valid Flask session (established via POST /api/auth/login)
+    or the API token supplied in the X-Themarr-Api-Key / Authorization header.
+    """
+    if session.get('authenticated'):
+        return None
     expected_token, _ = _get_api_auth_token()
     provided_token = _parse_auth_token()
     if provided_token and hmac.compare_digest(provided_token, expected_token):
@@ -1276,17 +1294,46 @@ def health():
     return jsonify({'status': 'healthy'}), 200
 
 
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    """Validate the API token and establish a server-side session.
+
+    The token is supplied in the JSON body so it is protected by TLS and never
+    appears in query parameters or log lines.  On success the browser receives an
+    httpOnly session cookie; the token is never stored client-side.
+    """
+    data = request.get_json(silent=True) or {}
+    provided_token = (data.get('token') or '').strip()
+    expected_token, is_generated = _get_api_auth_token()
+    if not provided_token or not hmac.compare_digest(provided_token, expected_token):
+        return jsonify({'error': 'Invalid API token'}), 401
+    session.clear()
+    session['authenticated'] = True
+    return jsonify({
+        'ok': True,
+        'api_auth_token_configured': not is_generated,
+        'api_auth_token_generated': is_generated,
+    })
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    """Clear the server-side session."""
+    session.clear()
+    return jsonify({'ok': True})
+
+
 @app.route('/api/settings/runtime')
 def get_settings_runtime():
-    """Expose non-sensitive runtime settings needed by the UI settings page.
+    """Return runtime settings for the UI settings page.
 
-    The API auth token is intentionally not returned here because this endpoint
-    is accessible without authentication.  The token is emitted to the server
-    log at startup (when auto-generated) and must be entered manually into the
-    browser UI where it is stored in localStorage.
+    This endpoint requires authentication (session cookie or API token header).
+    The actual API token is returned so the settings page can display it; it is
+    safe to do so because the caller is already authenticated.
     """
-    _, is_generated = _get_api_auth_token()
+    actual_token, is_generated = _get_api_auth_token()
     return jsonify({
+        'api_auth_token': actual_token,
         'api_auth_token_configured': not is_generated,
         'api_auth_token_generated': is_generated,
         'background_worker_count': BACKGROUND_WORKER_COUNT,
@@ -1297,16 +1344,21 @@ def get_settings_runtime():
 
 
 @app.before_request
-def enforce_mutating_api_auth():
-    """Protect mutating API endpoints with token auth."""
+def enforce_api_auth():
+    """Protect API endpoints with token or session auth."""
     _ensure_startup_warmup()
-    if request.method not in {'POST', 'PUT', 'PATCH', 'DELETE'}:
-        return None
     if not request.path.startswith('/api/'):
         return None
+    if request.path == '/api/auth/login':
+        return None  # Login endpoint is always public
     if request.path == '/api/webhooks/plex':
-        return None
-    return _check_api_request_auth()
+        return None  # Webhook uses its own Basic Auth
+    if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+        return _check_api_request_auth()
+    # Also protect the settings/runtime GET since it now returns the token
+    if request.path == '/api/settings/runtime':
+        return _check_api_request_auth()
+    return None
 
 
 @app.route('/api/status')

@@ -82,7 +82,7 @@ Primary environment variables are defined in `.env.example`:
 
 ## Security Notes
 
-- **API auth token**: never returned by the unauthenticated `GET /api/settings/runtime` endpoint; stored in `localStorage` by the UI after the user enters it manually.
+- **API auth token**: `GET /api/settings/runtime` is an **authenticated** endpoint — it requires a valid session cookie or API token header and returns the actual token in the response. The token is never written to `localStorage`. Users log in via the Settings page; the server sets an httpOnly session cookie (`POST /api/auth/login`). The token is kept in JS memory (`apiAuthToken`) for the lifetime of the tab.
 - **Media root validation**: `TV_SHOWS_HOST_PATH` / `MOVIES_HOST_PATH` are security controls — set them to constrain filesystem write operations to known library directories.
 - **yt-dlp**: `remote_components` must NOT be enabled (supply-chain risk — fetches and executes JS from GitHub at runtime).
 - **ThemerrDB URLs**: always validate with `is_valid_youtube_url()` before passing to yt-dlp.

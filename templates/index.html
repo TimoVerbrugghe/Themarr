@@ -178,7 +178,7 @@
         </div>
 
         <div class="settings-section">
-          <h2 class="settings-section-title">Runtime Security & Limits</h2>
+          <h2 class="settings-section-title">Runtime Security &amp; Limits</h2>
           <table class="settings-envtable">
             <tbody>
               <tr>
@@ -187,10 +187,11 @@
                   <code id="runtime-api-token">Loading…</code>
                   <button class="btn btn-secondary btn-sm" type="button" onclick="copyApiToken()">Copy</button>
                   <div id="runtime-api-token-source">Loading…</div>
-                  <div style="margin-top:0.5rem; display:flex; gap:0.5rem; align-items:center;">
+                  <div style="margin-top:0.5rem; display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
                     <input id="api-token-input" type="password" placeholder="Paste token from server logs…"
-                           style="flex:1; font-family:monospace; font-size:0.85rem;" autocomplete="off" />
-                    <button class="btn btn-primary btn-sm" type="button" onclick="saveApiToken()">Save</button>
+                           style="flex:1; min-width:14rem; font-family:monospace; font-size:0.85rem;" autocomplete="off" />
+                    <button class="btn btn-primary btn-sm" type="button" onclick="loginWithApiToken()">Login</button>
+                    <button class="btn btn-secondary btn-sm" type="button" onclick="logoutSession()">Logout</button>
                   </div>
                 </td>
               </tr>

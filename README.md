@@ -88,7 +88,8 @@ volumes:
 | `FLASK_DEBUG` | No | `false` | Enables Flask debug mode |
 | `DEFAULT_THEME` | No | `dark` | Default UI theme: `dark` or `light` |
 | `DEFAULT_VIEW` | No | `list` | Default library view: `list` or `grid` |
-| `API_AUTH_TOKEN` | No | auto-generated | Token for mutating API routes. If unset, Themarr generates one at startup and exposes it on the Settings page |
+| `API_AUTH_TOKEN` | No | auto-generated | Token for mutating API routes. If unset, Themarr generates one at startup and logs it. See the Settings page to authenticate. |
+| `FLASK_SECRET_KEY` | No | auto-generated | Secret used to sign the browser session cookie. Set a stable value to keep sessions across container restarts. |
 | `WEBHOOK_USERNAME` | No | — | Optional Basic Auth username for Plex webhook endpoint |
 | `WEBHOOK_PASSWORD` | No | — | Optional Basic Auth password for Plex webhook endpoint |
 | `PUSHOVER_APP_TOKEN` | No | — | Pushover app token (required together with `PUSHOVER_USER_KEY`) |
@@ -135,7 +136,7 @@ All mutating API routes require either:
 - `X-Themarr-Api-Key: <token>` or
 - `Authorization: Bearer <token>`
 
-If `API_AUTH_TOKEN` is not set, Themarr generates a token at startup. You can copy the active token from **Settings → Runtime Security & Limits**.
+If `API_AUTH_TOKEN` is not set, Themarr generates a token at startup and logs it. Go to **Settings → Runtime Security & Limits**, paste the token from the logs, and click **Login**. A server-side session is established (httpOnly cookie) and the Settings page will then display the active token. The token is never stored in the browser — use **Logout** to end the session.
 
 ## Screenshots
 

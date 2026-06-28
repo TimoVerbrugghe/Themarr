@@ -44,8 +44,11 @@ let activePlayBtn = null; // button element that triggered playback
 const STARTUP_POLL_INTERVAL_MS = 1500;
 let lastCompactActionMenuMode = null;
 const ACTION_MENU_COLLAPSE_BREAKPOINT = 1200;
-const API_TOKEN_STORAGE_KEY = 'themarr-api-token';
-let apiAuthToken = localStorage.getItem(API_TOKEN_STORAGE_KEY) || '';
+// API token is kept in memory only; it is never written to localStorage.
+// The server returns it from the authenticated GET /api/settings/runtime endpoint.
+let apiAuthToken = '';
+// Remove any token previously stored in localStorage by older versions of this app.
+try { localStorage.removeItem('themarr-api-token'); } catch (_) { /* ignore */ }
 
 function makeLibraryCacheKey(provider, libraryId) {
   return `${provider}:${libraryId}`;
@@ -54,7 +57,7 @@ function makeLibraryCacheKey(provider, libraryId) {
 function copyApiToken() {
   const token = apiAuthToken || '';
   if (!token) {
-    showSettingsResult(false, '✗ No API token configured in browser');
+    showSettingsResult(false, '✗ Not logged in — paste the token from the server logs and click Login first');
     return;
   }
   navigator.clipboard.writeText(token)
@@ -62,7 +65,7 @@ function copyApiToken() {
     .catch((err) => showSettingsResult(false, `✗ Failed to copy token: ${err}`));
 }
 
-function saveApiToken() {
+async function loginWithApiToken() {
   const inputEl = document.getElementById('api-token-input');
   if (!inputEl) return;
   const newToken = (inputEl.value || '').trim();
@@ -70,47 +73,72 @@ function saveApiToken() {
     showSettingsResult(false, '✗ Token cannot be empty');
     return;
   }
-  apiAuthToken = newToken;
-  // localStorage is intentionally used here for a local-network home-server app.
-  // Serving the token from an unauthenticated HTTP endpoint (the prior approach)
-  // is strictly worse than localStorage; XSS risk is mitigated by the server
-  // not exposing the token via any API endpoint at all.
-  localStorage.setItem(API_TOKEN_STORAGE_KEY, newToken); // lgtm[js/clear-text-storage-of-sensitive-data]
-  inputEl.value = '';
-  showSettingsResult(true, '✓ API token saved in browser');
-  loadSettingsRuntime();
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: newToken }),
+    });
+    if (!resp.ok) {
+      const err = (await resp.json().catch(() => ({}))).error || 'Invalid token';
+      showSettingsResult(false, `✗ ${err}`);
+      return;
+    }
+    inputEl.value = '';
+    apiAuthToken = newToken;
+    showSettingsResult(true, '✓ Authenticated — session established');
+    loadSettingsRuntime();
+  } catch (err) {
+    showSettingsResult(false, `✗ Login failed: ${err}`);
+  }
+}
+
+async function logoutSession() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (_) { /* ignore network errors on logout */ }
+  apiAuthToken = '';
+  const tokenEl = document.getElementById('runtime-api-token');
+  const sourceEl = document.getElementById('runtime-api-token-source');
+  if (tokenEl) tokenEl.textContent = 'Not authenticated';
+  if (sourceEl) sourceEl.textContent = 'Enter token below (check server startup logs for generated token)';
+  showSettingsResult(true, '✓ Logged out');
 }
 
 async function loadSettingsRuntime() {
   try {
     const data = await apiGet('/api/settings/runtime');
+    // Store token in memory so header-based API calls keep working
+    if (data.api_auth_token) apiAuthToken = data.api_auth_token;
     const tokenEl = document.getElementById('runtime-api-token');
     const sourceEl = document.getElementById('runtime-api-token-source');
     const workersEl = document.getElementById('runtime-worker-count');
     const pageSizeEl = document.getElementById('runtime-library-page-size');
     const pageMaxEl = document.getElementById('runtime-library-page-max');
     const posterCacheEl = document.getElementById('runtime-poster-cache-max');
-    if (tokenEl) tokenEl.textContent = apiAuthToken ? '••••••••' + apiAuthToken.slice(-4) : 'Not configured';
+    if (tokenEl) tokenEl.textContent = data.api_auth_token ? '••••••••' + data.api_auth_token.slice(-4) : 'Not configured';
     if (sourceEl) {
-      if (apiAuthToken) {
-        sourceEl.textContent = data.api_auth_token_configured ? 'from API_AUTH_TOKEN (stored in browser)' : 'auto-generated (stored in browser)';
-      } else {
-        sourceEl.textContent = 'Enter token below (check server startup logs for generated token)';
-      }
+      sourceEl.textContent = data.api_auth_token_configured ? 'from API_AUTH_TOKEN env variable' : 'auto-generated at startup';
     }
     if (workersEl) workersEl.textContent = String(data.background_worker_count);
     if (pageSizeEl) pageSizeEl.textContent = String(data.library_page_size);
     if (pageMaxEl) pageMaxEl.textContent = String(data.library_page_size_max);
     if (posterCacheEl) posterCacheEl.textContent = String(data.poster_cache_max_items);
   } catch (err) {
-    showSettingsResult(false, `✗ Failed to load runtime settings: ${err}`);
+    const tokenEl = document.getElementById('runtime-api-token');
+    const sourceEl = document.getElementById('runtime-api-token-source');
+    if (tokenEl) tokenEl.textContent = 'Not authenticated';
+    if (sourceEl) sourceEl.textContent = 'Enter token below (check server startup logs for generated token)';
   }
 }
 
 async function refreshApiAuthToken() {
-  // Token is stored in localStorage; load runtime metadata separately.
-  apiAuthToken = localStorage.getItem(API_TOKEN_STORAGE_KEY) || '';
-  return apiGet('/api/settings/runtime');
+  // Try to retrieve token from an existing session; silently ignore 401
+  // (user will need to enter the token via the settings page login form).
+  try {
+    const data = await apiGet('/api/settings/runtime');
+    if (data.api_auth_token) apiAuthToken = data.api_auth_token;
+  } catch (_) { /* not yet authenticated — ignore */ }
 }
 
 function libraryItemsPath(provider, libraryId) {
