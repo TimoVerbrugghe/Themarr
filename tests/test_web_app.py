@@ -2012,38 +2012,3 @@ class TestThemerrDbCacheKey:
         assert key_typed != key_untyped
 
 
-class TestPathBoundaryEnforcement:
-    """FINDING-04 — _validate_local_media_path must enforce TV/Movies root boundaries."""
-
-    def test_path_within_tv_root_accepted(self, tmp_path):
-        tv_dir = tmp_path / 'tv'
-        tv_dir.mkdir()
-        show_dir = tv_dir / 'MyShow'
-        show_dir.mkdir()
-        with patch.dict(os.environ, {'TV_SHOWS_HOST_PATH': str(tv_dir), 'MOVIES_HOST_PATH': ''}):
-            from importlib import reload
-            import app.media_utils as mu
-            reload(mu)
-            result = mu._validate_local_media_path(show_dir)
-        assert result is not None
-
-    def test_path_outside_roots_rejected(self, tmp_path):
-        tv_dir = tmp_path / 'tv'
-        tv_dir.mkdir()
-        outside_dir = tmp_path / 'secrets'
-        outside_dir.mkdir()
-        with patch.dict(os.environ, {'TV_SHOWS_HOST_PATH': str(tv_dir), 'MOVIES_HOST_PATH': ''}):
-            from importlib import reload
-            import app.media_utils as mu
-            reload(mu)
-            with pytest.raises(ValueError, match='outside the allowed media directories'):
-                mu._validate_local_media_path(outside_dir)
-
-    def test_no_roots_configured_accepts_any_path(self, tmp_path):
-        """When neither root is configured, boundary check is skipped."""
-        with patch.dict(os.environ, {'TV_SHOWS_HOST_PATH': '', 'MOVIES_HOST_PATH': ''}):
-            from importlib import reload
-            import app.media_utils as mu
-            reload(mu)
-            result = mu._validate_local_media_path('/some/path')
-        assert result is not None

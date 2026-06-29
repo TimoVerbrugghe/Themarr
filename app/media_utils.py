@@ -22,25 +22,8 @@ def _is_video_file_path(path):
     return path.suffix.lower() in VIDEO_FILE_EXTENSIONS
 
 
-def _get_allowed_media_roots() -> list:
-    """Return the configured media root boundaries from environment variables."""
-    roots = []
-    for env_var in ('TV_SHOWS_HOST_PATH', 'MOVIES_HOST_PATH'):
-        val = (os.getenv(env_var) or '').strip()
-        if val:
-            try:
-                roots.append(Path(val).resolve())
-            except Exception:
-                pass
-    return roots
-
-
 def _validate_local_media_path(local_path):
-    """Normalize and validate local media path for safe filesystem usage.
-
-    When TV_SHOWS_HOST_PATH or MOVIES_HOST_PATH are configured, the resolved
-    path must fall within one of those roots (path-boundary enforcement).
-    """
+    """Normalize and validate local media path for safe filesystem usage."""
     if local_path is None:
         return None
 
@@ -53,21 +36,7 @@ def _validate_local_media_path(local_path):
     if not normalized.startswith('/'):
         raise ValueError('Invalid local media path')
 
-    normalized_path = Path(normalized)
-
-    allowed_roots = _get_allowed_media_roots()
-    if allowed_roots:
-        normalized_resolved = normalized_path.resolve() if normalized_path.exists() else normalized_path
-        # Use is_relative_to() (Python 3.9+) for clear, edge-case-safe boundary check.
-        if not any(
-            normalized_resolved == root or normalized_resolved.is_relative_to(root)
-            for root in allowed_roots
-        ):
-            raise ValueError(
-                f'Path {normalized_path} is outside the allowed media directories'
-            )
-
-    return normalized_path
+    return Path(normalized)
 
 
 def _is_valid_mp3_magic(file_obj) -> bool:
