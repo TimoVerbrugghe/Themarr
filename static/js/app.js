@@ -841,6 +841,7 @@ function createGetThemeButton(item, view) {
   btn.type = 'button';
   btn.className = 'action-btn action-btn-get-theme';
   btn.title = 'Get theme';
+  const isPlexItem = (item.provider || 'plex') === 'plex';
 
   const labelSpan = document.createElement('span');
   labelSpan.textContent = 'Get Theme';
@@ -850,7 +851,7 @@ function createGetThemeButton(item, view) {
   const indicators = document.createElement('span');
   indicators.className = 'get-theme-indicators';
 
-  if (plexConfigured) {
+  if (plexConfigured && isPlexItem) {
     const plexImg = document.createElement('img');
     plexImg.src = 'https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/plex.svg';
     plexImg.alt = '';
@@ -1324,6 +1325,7 @@ document.addEventListener('click', (e) => {
 // ============================================================
 function openGetThemeModal(item) {
   activeItemContext = { provider: item.provider || 'plex', id: String(item.id || item.ratingKey), item };
+  const isPlexItem = activeItemContext.provider === 'plex';
 
   // Configure source buttons based on availability
   const plexBtn = document.getElementById('get-theme-btn-plex');
@@ -1332,9 +1334,9 @@ function openGetThemeModal(item) {
   const tdbStatus = document.getElementById('get-theme-themerrdb-status');
 
   if (plexBtn) {
-    plexBtn.classList.toggle('hidden', !plexConfigured);
+    plexBtn.classList.toggle('hidden', !plexConfigured || !isPlexItem);
     plexBtn.disabled = !item.has_plex_theme;
-    if (plexStatus && plexConfigured) {
+    if (plexStatus && plexConfigured && isPlexItem) {
       if (!item.has_plex_theme) {
         plexStatus.textContent = 'Not available';
       } else if (item.plex_theme_source_unverified) {
@@ -1357,6 +1359,10 @@ function getThemeSelectSource(source) {
   const item = activeItemContext && activeItemContext.item;
   if (!item) return;
   if (source === 'plex') {
+    if ((item.provider || 'plex') !== 'plex') {
+      showToast('info', 'Plex source is only available for Plex items.');
+      return;
+    }
     if (!plexConfigured) {
       showToast('info', 'Plex source is unavailable because Plex is not configured.');
       return;
