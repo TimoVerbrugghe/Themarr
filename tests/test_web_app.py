@@ -17,12 +17,13 @@ if str(PROJECT_ROOT) not in sys.path:
 def app():
     """Create test Flask app."""
     from app import web_app
+    from app import themerrdb_service
     web_app.app.config['TESTING'] = True
     web_app._invalidate_library_cache()
-    web_app._themerrdb_cache.clear()
+    themerrdb_service._themerrdb_cache.clear()
     yield web_app.app
     web_app._invalidate_library_cache()
-    web_app._themerrdb_cache.clear()
+    themerrdb_service._themerrdb_cache.clear()
 
 
 @pytest.fixture
@@ -972,7 +973,7 @@ class TestThemeYoutube:
         fake_tmpdir.mkdir()
         (fake_tmpdir / 'theme.mp3').write_bytes(b'youtube_audio')
 
-        with patch('app.web_app.yt_dlp') as mock_ytdlp, \
+        with patch('app.youtube_utils.yt_dlp') as mock_ytdlp, \
              patch('tempfile.TemporaryDirectory') as mock_tmpdir:
             mock_tmpdir.return_value.__enter__ = lambda s: str(fake_tmpdir)
             mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
@@ -988,11 +989,12 @@ class TestThemeYoutube:
 class TestThemerrDB:
     def test_query_themerrdb_caches_not_found_results(self):
         from app import web_app
+        from app import themerrdb_service
 
-        web_app._themerrdb_cache.clear()
+        themerrdb_service._themerrdb_cache.clear()
         mock_response = MagicMock()
         mock_response.status_code = 404
-        with patch('app.web_app.http_requests.get', return_value=mock_response) as mock_get:
+        with patch('app.themerrdb_service.http_requests.get', return_value=mock_response) as mock_get:
             first = web_app.query_themerrdb('movies', 'imdb', 'tt0000001')
             second = web_app.query_themerrdb('movies', 'imdb', 'tt0000001')
 
@@ -1002,12 +1004,13 @@ class TestThemerrDB:
 
     def test_get_themerrdb_theme_reuses_cached_result_across_item_ids(self):
         from app import web_app
+        from app import themerrdb_service
 
-        web_app._themerrdb_cache.clear()
+        themerrdb_service._themerrdb_cache.clear()
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {'youtube_theme_url': 'https://youtube.com/watch?v=test'}
-        with patch('app.web_app.http_requests.get', return_value=mock_response) as mock_get:
+        with patch('app.themerrdb_service.http_requests.get', return_value=mock_response) as mock_get:
             first = web_app.get_themerrdb_theme_for_external_ids('movie', {'imdb': 'tt1234567', 'tmdb': '123', 'tvdb': None})
             second = web_app.get_themerrdb_theme_for_external_ids('movie', {'imdb': None, 'tmdb': '123', 'tvdb': None})
 
@@ -1020,8 +1023,8 @@ class TestThemerrDB:
         show.guids = [{'id': 'imdb://tt1234567'}]
         mock_plex.fetchItem.return_value = show
 
-        with patch('app.web_app._get_themerrdb_data_for_context', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
-             patch('app.web_app._extract_youtube_audio_url', return_value='https://audio.example/stream'):
+        with patch('app.web_app.get_themerrdb_data_for_context', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
+             patch('app.web_app.extract_youtube_audio_url', return_value='https://audio.example/stream'):
             resp = client.get('/api/items/1/theme/themerrdb/check')
 
         assert resp.status_code == 200
@@ -1057,7 +1060,7 @@ class TestThemerrDB:
         mock_plex.fetchItem.return_value = show
 
         with patch('app.web_app.get_themerrdb_theme', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
-             patch('app.web_app._extract_youtube_audio_url', return_value='https://rr1---sn-test.googlevideo.com/stream'), \
+             patch('app.web_app.extract_youtube_audio_url', return_value='https://rr1---sn-test.googlevideo.com/stream'), \
              patch('app.web_app.http_requests') as mock_requests:
 
             mock_resp = MagicMock()
@@ -1093,7 +1096,7 @@ class TestThemerrDB:
         (fake_tmpdir / 'theme.mp3').write_bytes(b'themerrdb_audio')
 
         with patch('app.web_app.get_themerrdb_theme', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
-             patch('app.web_app.yt_dlp') as mock_ytdlp, \
+             patch('app.youtube_utils.yt_dlp') as mock_ytdlp, \
              patch('tempfile.TemporaryDirectory') as mock_tmpdir:
             mock_tmpdir.return_value.__enter__ = lambda s: str(fake_tmpdir)
             mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
@@ -1129,8 +1132,8 @@ class TestThemerrDB:
             'local_path': '/movies/Jellyfin Movie (2020)',
         }
         with patch('app.web_app._get_item_context', return_value=context), \
-             patch('app.web_app._get_themerrdb_data_for_context', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
-             patch('app.web_app._extract_youtube_audio_url', return_value='https://audio.example/stream'), \
+             patch('app.web_app.get_themerrdb_data_for_context', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
+             patch('app.web_app.extract_youtube_audio_url', return_value='https://audio.example/stream'), \
              patch('app.web_app._get_external_ids_for_context', return_value={'imdb': 'tt1234567', 'tmdb': None, 'tvdb': None}):
             resp = client.get('/api/items/jellyfin/jf-1/theme/themerrdb/check')
 
@@ -2028,15 +2031,15 @@ class TestThemerrDbCacheKey:
     """BUG-002 — ThemerrDB cache key must include item_type to prevent cross-type collisions."""
 
     def test_cache_keys_differ_by_item_type(self):
-        from app import web_app
-        key_movie = web_app._get_themerrdb_cache_key('tt1234567', 'movies')
-        key_show = web_app._get_themerrdb_cache_key('tt1234567', 'tv_shows')
+        from app import themerrdb_service
+        key_movie = themerrdb_service._get_themerrdb_cache_key('tt1234567', 'movies')
+        key_show = themerrdb_service._get_themerrdb_cache_key('tt1234567', 'tv_shows')
         assert key_movie != key_show, (
             "Same external ID with different item types must produce different cache keys"
         )
 
     def test_cache_key_without_type_is_distinct(self):
-        from app import web_app
-        key_typed = web_app._get_themerrdb_cache_key('tt1234567', 'movies')
-        key_untyped = web_app._get_themerrdb_cache_key('tt1234567')
+        from app import themerrdb_service
+        key_typed = themerrdb_service._get_themerrdb_cache_key('tt1234567', 'movies')
+        key_untyped = themerrdb_service._get_themerrdb_cache_key('tt1234567')
         assert key_typed != key_untyped

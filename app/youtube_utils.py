@@ -1,9 +1,11 @@
 """YouTube URL validation and yt-dlp option helpers."""
 import logging
 import os
+from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
+import yt_dlp
 
 from app.media_utils import MAX_UPLOAD_BYTES
 
@@ -103,3 +105,57 @@ def _stream_http_response_chunks(response, *, chunk_size=8192):
         logger.info('Stream interrupted while sending preview audio: %s', exc)
     finally:
         response.close()
+
+
+_ALLOWED_AUDIO_STREAM_HOSTS = {'googlevideo.com', 'youtube.com', 'googleusercontent.com'}
+
+
+def extract_youtube_audio_url(youtube_url):
+    """Resolve a direct audio stream URL for a YouTube video with retries."""
+    errors = []
+    for profile_name, overrides in _youtube_retry_profiles():
+        try:
+            with yt_dlp.YoutubeDL(_youtube_preview_ydl_opts(overrides)) as ydl:
+                info = ydl.extract_info(youtube_url, download=False)
+            audio_url = info.get('url')
+            if audio_url:
+                return audio_url
+            errors.append(f'{profile_name}: Could not extract audio from YouTube')
+        except yt_dlp.utils.DownloadError as exc:
+            errors.append(f'{profile_name}: {_clean_yt_dlp_error(exc)}')
+    raise yt_dlp.utils.DownloadError(' | '.join(errors))
+
+
+def is_valid_audio_stream_url(url):
+    """Return True when a yt-dlp resolved stream URL is from an allowed CDN host.
+
+    This guards against SSRF: yt-dlp should only return googlevideo.com (or
+    similar Google CDN) URLs for YouTube content.  Any other host is rejected.
+    """
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in {'https', 'http'}:
+            return False
+        hostname = (parsed.hostname or '').lower()
+        return any(
+            hostname == h or hostname.endswith('.' + h)
+            for h in _ALLOWED_AUDIO_STREAM_HOSTS
+        )
+    except ValueError:
+        return False
+
+
+def download_youtube_theme_mp3(youtube_url, tmpdir):
+    """Download YouTube audio as MP3 with client-profile fallback retries."""
+    errors = []
+    for profile_name, overrides in _youtube_retry_profiles():
+        try:
+            with yt_dlp.YoutubeDL(_youtube_download_ydl_opts(tmpdir, overrides)) as ydl:
+                ydl.download([youtube_url])
+            mp3_files = list(Path(tmpdir).glob('*.mp3'))
+            if mp3_files:
+                return mp3_files[0]
+            errors.append(f'{profile_name}: Download failed: no MP3 file produced')
+        except yt_dlp.utils.DownloadError as exc:
+            errors.append(f'{profile_name}: {_clean_yt_dlp_error(exc)}')
+    raise yt_dlp.utils.DownloadError(' | '.join(errors))
