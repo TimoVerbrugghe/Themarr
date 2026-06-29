@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 @pytest.fixture
 def app():
     """Create test Flask app."""
-    import web_app
+    from app import web_app
     web_app.app.config['TESTING'] = True
     web_app._invalidate_library_cache()
     web_app._themerrdb_cache.clear()
@@ -28,7 +28,7 @@ def app():
 @pytest.fixture
 def client(app):
     """Create test client."""
-    import web_app
+    from app import web_app
     api_key, _ = web_app._get_api_key()
     test_client = app.test_client()
     test_client.environ_base['HTTP_X_THEMARR_API_KEY'] = api_key
@@ -38,8 +38,8 @@ def client(app):
 @pytest.fixture
 def mock_plex():
     """Mock PlexServer."""
-    with patch('web_app.plex_is_configured', return_value=True):
-        with patch('web_app.get_plex') as mock_get_plex:
+    with patch('app.web_app.plex_is_configured', return_value=True):
+        with patch('app.web_app.get_plex') as mock_get_plex:
             plex = MagicMock()
             plex.friendlyName = 'Test Plex Server'
             plex.version = '1.0.0'
@@ -96,7 +96,7 @@ class TestStatus:
 
     def test_status_disconnected(self, client):
         with patch.dict(os.environ, {'PLEX_URL': 'http://plex.local', 'PLEX_TOKEN': 'token'}, clear=False):
-            with patch('web_app.get_plex', side_effect=Exception('Connection refused')):
+            with patch('app.web_app.get_plex', side_effect=Exception('Connection refused')):
                 resp = client.get('/api/status')
             assert resp.status_code == 200
             data = resp.get_json()
@@ -128,7 +128,7 @@ class TestStatus:
         mock_response.json.return_value = {'ServerName': 'Test Jellyfin', 'Version': '10.9.1'}
         mock_response.raise_for_status.return_value = None
         with patch.dict(os.environ, {'JELLYFIN_URL': 'http://jellyfin.local', 'JELLYFIN_API_KEY': 'j-key'}, clear=False):
-            with patch('web_app.jellyfin_session_get', return_value=mock_response):
+            with patch('app.web_app.jellyfin_session_get', return_value=mock_response):
                 resp = client.get('/api/status')
         assert resp.status_code == 200
         data = resp.get_json()
@@ -137,7 +137,7 @@ class TestStatus:
         assert data['jellyfin']['server_name'] == 'Test Jellyfin'
 
     def test_status_marks_jellyfin_connected_when_system_info_endpoints_fail_but_libraries_work(self, client):
-        import web_app
+        from app import web_app
 
         mock_library_response = MagicMock()
         mock_library_response.raise_for_status.return_value = None
@@ -146,7 +146,7 @@ class TestStatus:
 
         with patch.dict(os.environ, {'JELLYFIN_URL': 'http://jellyfin.local', 'JELLYFIN_API_KEY': 'j-key'}, clear=False):
             with patch(
-                'web_app.jellyfin_session_get',
+                'app.web_app.jellyfin_session_get',
                 side_effect=[
                     web_app.http_requests.RequestException('System info unavailable'),
                     web_app.http_requests.RequestException('Public system info unavailable'),
@@ -168,7 +168,7 @@ class TestStatus:
         mock_response.raise_for_status.return_value = None
 
         with patch.dict(os.environ, {'JELLYFIN_URL': 'http://jellyfin.local', 'JELLYFIN_API_KEY': 'j-key'}, clear=False):
-            with patch('web_app.jellyfin_session_get', return_value=mock_response):
+            with patch('app.web_app.jellyfin_session_get', return_value=mock_response):
                 resp = client.get('/api/status')
 
         assert resp.status_code == 200
@@ -187,7 +187,7 @@ class TestHealth:
 
 class TestCacheStatus:
     def test_cache_status_endpoint(self, client):
-        import web_app
+        from app import web_app
 
         with web_app._theme_hydration_status_lock:
             web_app._theme_hydration_status.update({
@@ -208,7 +208,7 @@ class TestCacheStatus:
 
 class TestCachedThemeStateSync:
     def test_sync_cached_item_theme_state_preserves_plex_source_when_reported(self, tmp_path):
-        import web_app
+        from app import web_app
 
         show_dir = tmp_path / 'Test Show (2020)'
         show_dir.mkdir()
@@ -224,7 +224,7 @@ class TestCachedThemeStateSync:
         }]
 
         mock_item = make_mock_show(rating_key=1, location=str(show_dir), has_theme=True)
-        with patch('web_app.get_plex') as mock_get_plex:
+        with patch('app.web_app.get_plex') as mock_get_plex:
             plex = MagicMock()
             plex.fetchItem.return_value = mock_item
             mock_get_plex.return_value = plex
@@ -238,7 +238,7 @@ class TestCachedThemeStateSync:
 
 class TestSettingsRuntime:
     def test_generated_api_key_warning_does_not_log_secret(self):
-        import web_app
+        from app import web_app
         with patch.object(web_app.logger, 'warning') as mock_warning:
             web_app._log_generated_api_key_warning()
 
@@ -288,7 +288,7 @@ class TestSettingsRuntime:
         assert env_values['DISABLE_AUTH'] == 'false'
 
     def test_runtime_settings_accessible_via_session(self, app):
-        import web_app
+        from app import web_app
         with patch.dict(os.environ, {'API_KEY': 'sess-key', 'AUTH_USERNAME': 'admin', 'AUTH_PASSWORD': 'secret'}):
             with app.test_client() as session_client:
                 login_resp = session_client.post(
@@ -370,8 +370,8 @@ class TestLibraries:
         assert all('id' in d and 'key' in d and d['id'] == d['key'] for d in data)
 
     def test_get_libraries_error(self, client):
-        with patch('web_app.plex_is_configured', return_value=True):
-            with patch('web_app.get_plex', side_effect=Exception('Plex error')):
+        with patch('app.web_app.plex_is_configured', return_value=True):
+            with patch('app.web_app.get_plex', side_effect=Exception('Plex error')):
                 resp = client.get('/api/libraries')
                 assert resp.status_code == 500
                 assert resp.get_json()['error'] == 'Failed to get libraries'
@@ -394,8 +394,8 @@ class TestLibraries:
             'totalSize': 20,
             'provider': 'jellyfin',
         }
-        with patch('web_app.jellyfin_is_configured', return_value=True), \
-             patch('web_app._get_jellyfin_libraries', return_value=[jellyfin_library]):
+        with patch('app.web_app.jellyfin_is_configured', return_value=True), \
+             patch('app.web_app._get_jellyfin_libraries', return_value=[jellyfin_library]):
             resp = client.get('/api/libraries')
 
         assert resp.status_code == 200
@@ -415,9 +415,9 @@ class TestLibraries:
         }
 
         with patch.dict(os.environ, {'PLEX_URL': '', 'PLEX_TOKEN': ''}, clear=False):
-            with patch('web_app.get_plex', side_effect=AssertionError('get_plex should not be called')):
-                with patch('web_app.jellyfin_is_configured', return_value=True), \
-                     patch('web_app._get_jellyfin_libraries', return_value=[jellyfin_library]):
+            with patch('app.web_app.get_plex', side_effect=AssertionError('get_plex should not be called')):
+                with patch('app.web_app.jellyfin_is_configured', return_value=True), \
+                     patch('app.web_app._get_jellyfin_libraries', return_value=[jellyfin_library]):
                     resp = client.get('/api/libraries')
 
         assert resp.status_code == 200
@@ -461,7 +461,7 @@ class TestLibraryItems:
 
 class TestExternalIds:
     def test_extract_external_ids_from_dict_guids(self):
-        import web_app
+        from app import web_app
 
         item = MagicMock()
         item.guids = [
@@ -473,7 +473,7 @@ class TestExternalIds:
         assert ids == {'imdb': 'tt0111161', 'tvdb': '121361', 'tmdb': None}
 
     def test_extract_external_ids_from_plex_guid_objects(self):
-        import web_app
+        from app import web_app
 
         item = MagicMock()
         item.guids = [
@@ -485,7 +485,7 @@ class TestExternalIds:
         assert ids == {'imdb': 'tt0468569', 'tvdb': '80379', 'tmdb': None}
 
     def test_serialize_jellyfin_item_sets_themerrdb_flag(self):
-        import web_app
+        from app import web_app
 
         jellyfin_item = {
             'Id': 'jf-1',
@@ -496,7 +496,7 @@ class TestExternalIds:
             'ProviderIds': {'Imdb': 'tt1234567', 'Tmdb': '1234'},
         }
 
-        with patch('web_app.get_themerrdb_theme_for_item', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}):
+        with patch('app.web_app.get_themerrdb_theme_for_item', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}):
             data = web_app._serialize_jellyfin_item(jellyfin_item, 'jf-lib', theme_dirs={})
 
         assert data['has_themerrdb_theme'] is True
@@ -526,7 +526,7 @@ class TestLibraryItemsAdditional:
         assert data[0]['theme_size'] > 0
 
     def test_build_library_items_prefers_section_locations_for_theme_scan(self, mock_plex):
-        import web_app
+        from app import web_app
 
         section = MagicMock()
         section.key = 1
@@ -534,8 +534,8 @@ class TestLibraryItemsAdditional:
         section.all.return_value = []
         mock_plex.library.sectionByID.return_value = section
 
-        with patch('web_app.scan_local_theme_dirs', return_value={}) as mock_scan, \
-             patch('web_app.get_section_base_paths', return_value={'/fallback-path'}):
+        with patch('app.web_app.scan_local_theme_dirs', return_value={}) as mock_scan, \
+             patch('app.web_app.get_section_base_paths', return_value={'/fallback-path'}):
             web_app._build_library_items(1)
 
         assert mock_scan.call_count == 1
@@ -551,7 +551,7 @@ class TestLibraryItemsAdditional:
             'has_plex_theme': False,
             'has_local_theme': False,
         }]
-        with patch('web_app._build_library_items', return_value=jellyfin_items):
+        with patch('app.web_app._build_library_items', return_value=jellyfin_items):
             resp = client.get('/api/libraries/jellyfin/jf-lib/items')
         assert resp.status_code == 200
         data = resp.get_json()
@@ -559,7 +559,7 @@ class TestLibraryItemsAdditional:
         assert data[0]['title'] == 'Jellyfin Show'
 
     def test_scan_local_theme_dirs_detects_theme_when_item_path_is_base(self, tmp_path):
-        import web_app
+        from app import web_app
 
         movie_dir = tmp_path / 'Monsters, Inc. (2001)'
         movie_dir.mkdir()
@@ -572,7 +572,7 @@ class TestLibraryItemsAdditional:
 
 class TestGetItemLocalPath:
     def test_show_path(self, tmp_path):
-        from web_app import get_item_local_path
+        from app.web_app import get_item_local_path
         show_dir = tmp_path / 'My Show (2020)'
         show_dir.mkdir()
         show = MagicMock()
@@ -582,7 +582,7 @@ class TestGetItemLocalPath:
         assert result == show_dir
 
     def test_movie_path(self, tmp_path):
-        from web_app import get_item_local_path
+        from app.web_app import get_item_local_path
         movie_dir = tmp_path / 'My Movie (2021)'
         movie_dir.mkdir()
         movie_file = movie_dir / 'movie.mkv'
@@ -594,7 +594,7 @@ class TestGetItemLocalPath:
         assert result == movie_dir
 
     def test_movie_folder_with_dot_name_is_not_treated_as_file(self, tmp_path):
-        from web_app import get_item_local_path
+        from app.web_app import get_item_local_path
         movie_dir = tmp_path / 'Monsters, Inc. (2001)'
         movie_dir.mkdir()
         movie = MagicMock()
@@ -604,7 +604,7 @@ class TestGetItemLocalPath:
         assert result == movie_dir
 
     def test_no_locations(self):
-        from web_app import get_item_local_path
+        from app.web_app import get_item_local_path
         item = MagicMock()
         item.type = 'show'
         item.locations = []
@@ -614,31 +614,31 @@ class TestGetItemLocalPath:
 
 class TestGetJellyfinItemLocalPath:
     def test_movie_file_path_returns_parent(self):
-        from web_app import get_jellyfin_item_local_path
+        from app.web_app import get_jellyfin_item_local_path
         item = {'Type': 'Movie', 'Path': '/movies/Monsters, Inc. (2001)/movie.mkv'}
         assert str(get_jellyfin_item_local_path(item)) == '/movies/Monsters, Inc. (2001)'
 
     def test_movie_folder_with_dot_name_returns_folder(self):
-        from web_app import get_jellyfin_item_local_path
+        from app.web_app import get_jellyfin_item_local_path
         item = {'Type': 'Movie', 'Path': '/movies/Monsters, Inc. (2001)'}
         assert str(get_jellyfin_item_local_path(item)) == '/movies/Monsters, Inc. (2001)'
 
 
 class TestLocalPathValidation:
     def test_validate_local_media_path_rejects_traversal(self):
-        from web_app import _validate_local_media_path
+        from app.web_app import _validate_local_media_path
 
         with pytest.raises(ValueError, match='Invalid local media path'):
             _validate_local_media_path('../../etc/passwd')
 
     def test_validate_local_media_path_allows_absolute_paths_without_env_roots(self, tmp_path):
-        from web_app import _validate_local_media_path
+        from app.web_app import _validate_local_media_path
 
         validated = _validate_local_media_path(tmp_path / 'other' / 'show')
         assert str(validated).endswith('/other/show')
 
     def test_provider_theme_accepts_absolute_paths_without_env_roots(self, client):
-        with patch('web_app._get_item_context', return_value={'local_path': Path('/etc')}):
+        with patch('app.web_app._get_item_context', return_value={'local_path': Path('/etc')}):
             resp = client.get('/api/items/jellyfin/abc/theme')
 
         assert resp.status_code == 404
@@ -664,7 +664,7 @@ class TestThemeDownload:
         assert data['success'] is True
 
     def test_download_theme_updates_cached_item_state(self, client, mock_plex, tmp_path):
-        import web_app
+        from app import web_app
 
         show_dir = tmp_path / 'Test Show (2020)'
         show_dir.mkdir()
@@ -823,8 +823,8 @@ class TestProviderThemeUpload:
             'title': 'Jellyfin Show',
             'local_path': jf_dir,
         }
-        with patch('web_app._get_item_context', return_value=context), \
-             patch('web_app._sync_cached_item_theme_state', return_value=(None, False)):
+        with patch('app.web_app._get_item_context', return_value=context), \
+             patch('app.web_app._sync_cached_item_theme_state', return_value=(None, False)):
             resp = client.post(
                 '/api/items/jellyfin/jf-item/theme/upload',
                 data={'overwrite': 'false',
@@ -912,7 +912,7 @@ class TestThemeCopy:
         assert (target_dir / 'theme.mp3').read_bytes() == b'new_theme_data'
 
     def test_copy_theme_updates_cached_item_state(self, client, mock_plex, tmp_path):
-        import web_app
+        from app import web_app
 
         source_dir = tmp_path / 'Source Show (2020)'
         target_dir = tmp_path / 'Target Show (2021)'
@@ -970,7 +970,7 @@ class TestThemeYoutube:
         fake_tmpdir.mkdir()
         (fake_tmpdir / 'theme.mp3').write_bytes(b'youtube_audio')
 
-        with patch('web_app.yt_dlp') as mock_ytdlp, \
+        with patch('app.web_app.yt_dlp') as mock_ytdlp, \
              patch('tempfile.TemporaryDirectory') as mock_tmpdir:
             mock_tmpdir.return_value.__enter__ = lambda s: str(fake_tmpdir)
             mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
@@ -985,12 +985,12 @@ class TestThemeYoutube:
 
 class TestThemerrDB:
     def test_query_themerrdb_caches_not_found_results(self):
-        import web_app
+        from app import web_app
 
         web_app._themerrdb_cache.clear()
         mock_response = MagicMock()
         mock_response.status_code = 404
-        with patch('web_app.http_requests.get', return_value=mock_response) as mock_get:
+        with patch('app.web_app.http_requests.get', return_value=mock_response) as mock_get:
             first = web_app.query_themerrdb('movies', 'imdb', 'tt0000001')
             second = web_app.query_themerrdb('movies', 'imdb', 'tt0000001')
 
@@ -999,13 +999,13 @@ class TestThemerrDB:
         assert mock_get.call_count == 1
 
     def test_get_themerrdb_theme_reuses_cached_result_across_item_ids(self):
-        import web_app
+        from app import web_app
 
         web_app._themerrdb_cache.clear()
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {'youtube_theme_url': 'https://youtube.com/watch?v=test'}
-        with patch('web_app.http_requests.get', return_value=mock_response) as mock_get:
+        with patch('app.web_app.http_requests.get', return_value=mock_response) as mock_get:
             first = web_app.get_themerrdb_theme_for_external_ids('movie', {'imdb': 'tt1234567', 'tmdb': '123', 'tvdb': None})
             second = web_app.get_themerrdb_theme_for_external_ids('movie', {'imdb': None, 'tmdb': '123', 'tvdb': None})
 
@@ -1018,8 +1018,8 @@ class TestThemerrDB:
         show.guids = [{'id': 'imdb://tt1234567'}]
         mock_plex.fetchItem.return_value = show
 
-        with patch('web_app._get_themerrdb_data_for_context', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
-             patch('web_app._extract_youtube_audio_url', return_value='https://audio.example/stream'):
+        with patch('app.web_app._get_themerrdb_data_for_context', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
+             patch('app.web_app._extract_youtube_audio_url', return_value='https://audio.example/stream'):
             resp = client.get('/api/items/1/theme/themerrdb/check')
 
         assert resp.status_code == 200
@@ -1032,7 +1032,7 @@ class TestThemerrDB:
         show.guids = []
         mock_plex.fetchItem.return_value = show
 
-        with patch('web_app.get_themerrdb_theme', return_value=None):
+        with patch('app.web_app.get_themerrdb_theme', return_value=None):
             resp = client.get('/api/items/1/theme/themerrdb/check')
 
         assert resp.status_code == 200
@@ -1044,7 +1044,7 @@ class TestThemerrDB:
         show = make_mock_show()
         mock_plex.fetchItem.return_value = show
 
-        with patch('web_app.get_themerrdb_theme', return_value=None):
+        with patch('app.web_app.get_themerrdb_theme', return_value=None):
             resp = client.get('/api/items/1/theme/themerrdb/preview')
 
         assert resp.status_code == 404
@@ -1054,9 +1054,9 @@ class TestThemerrDB:
         show = make_mock_show()
         mock_plex.fetchItem.return_value = show
 
-        with patch('web_app.get_themerrdb_theme', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
-             patch('web_app._extract_youtube_audio_url', return_value='https://rr1---sn-test.googlevideo.com/stream'), \
-             patch('web_app.http_requests') as mock_requests:
+        with patch('app.web_app.get_themerrdb_theme', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
+             patch('app.web_app._extract_youtube_audio_url', return_value='https://rr1---sn-test.googlevideo.com/stream'), \
+             patch('app.web_app.http_requests') as mock_requests:
 
             mock_resp = MagicMock()
             mock_resp.iter_content.return_value = [b'audio_chunk']
@@ -1090,8 +1090,8 @@ class TestThemerrDB:
         fake_tmpdir.mkdir()
         (fake_tmpdir / 'theme.mp3').write_bytes(b'themerrdb_audio')
 
-        with patch('web_app.get_themerrdb_theme', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
-             patch('web_app.yt_dlp') as mock_ytdlp, \
+        with patch('app.web_app.get_themerrdb_theme', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
+             patch('app.web_app.yt_dlp') as mock_ytdlp, \
              patch('tempfile.TemporaryDirectory') as mock_tmpdir:
             mock_tmpdir.return_value.__enter__ = lambda s: str(fake_tmpdir)
             mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
@@ -1126,10 +1126,10 @@ class TestThemerrDB:
             'item': {'Id': 'jf-1', 'Type': 'Movie', 'ProviderIds': {'Imdb': 'tt1234567'}},
             'local_path': '/movies/Jellyfin Movie (2020)',
         }
-        with patch('web_app._get_item_context', return_value=context), \
-             patch('web_app._get_themerrdb_data_for_context', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
-             patch('web_app._extract_youtube_audio_url', return_value='https://audio.example/stream'), \
-             patch('web_app._get_external_ids_for_context', return_value={'imdb': 'tt1234567', 'tmdb': None, 'tvdb': None}):
+        with patch('app.web_app._get_item_context', return_value=context), \
+             patch('app.web_app._get_themerrdb_data_for_context', return_value={'youtube_theme_url': 'https://youtube.com/watch?v=test'}), \
+             patch('app.web_app._extract_youtube_audio_url', return_value='https://audio.example/stream'), \
+             patch('app.web_app._get_external_ids_for_context', return_value={'imdb': 'tt1234567', 'tmdb': None, 'tvdb': None}):
             resp = client.get('/api/items/jellyfin/jf-1/theme/themerrdb/check')
 
         assert resp.status_code == 200
@@ -1299,7 +1299,7 @@ class TestGetTheme:
 
 class TestPosterCache:
     def test_get_poster_serves_from_in_memory_cache(self, client, mock_plex):
-        import web_app
+        from app import web_app
 
         web_app._set_cached_poster(1, b'cached_poster', 'image/jpeg')
 
@@ -1309,7 +1309,7 @@ class TestPosterCache:
         mock_plex.fetchItem.assert_not_called()
 
     def test_get_poster_populates_cache_on_first_fetch(self, client, mock_plex):
-        import web_app
+        from app import web_app
 
         show = make_mock_show(rating_key=1)
         mock_plex.fetchItem.return_value = show
@@ -1427,7 +1427,7 @@ class TestBulkDownload:
         assert len(data['success']) == 1
 
     def test_bulk_download_updates_cached_item_state(self, client, mock_plex, tmp_path):
-        import web_app
+        from app import web_app
 
         show_dir = tmp_path / 'Test Show (2020)'
         show_dir.mkdir()
@@ -1463,12 +1463,12 @@ class TestPlexWebhook:
         import json
         plex = MagicMock()
         plex.machineIdentifier = 'configured-server-uuid'
-        with patch('web_app.get_plex', return_value=plex):
+        with patch('app.web_app.get_plex', return_value=plex):
             return client.post('/api/webhooks/plex', data={'payload': json.dumps(payload)}, headers=headers or {})
 
     def test_library_new_event_queues_theme_processing(self, client):
         """library.new event with valid ratingKey queues theme processing."""
-        with patch('web_app._submit_background_job') as mock_submit:
+        with patch('app.web_app._submit_background_job') as mock_submit:
             payload = {'event': 'library.new', 'Metadata': {'ratingKey': '12345'}, 'Server': {'uuid': 'configured-server-uuid'}}
             resp = self._post_webhook(client, payload)
         
@@ -1479,7 +1479,7 @@ class TestPlexWebhook:
 
     def test_library_new_event_with_metadata_fallback(self, client):
         """Handles both 'Metadata' and 'metadata' field names."""
-        with patch('web_app._submit_background_job') as mock_submit:
+        with patch('app.web_app._submit_background_job') as mock_submit:
             payload = {'event': 'library.new', 'metadata': {'ratingKey': '67890'}, 'Server': {'uuid': 'configured-server-uuid'}}
             resp = self._post_webhook(client, payload)
         
@@ -1507,7 +1507,7 @@ class TestPlexWebhook:
     def test_non_library_new_event_ignored(self, client):
         """Non-library.new events are safely ignored."""
         payload = {'event': 'library.update', 'Metadata': {'ratingKey': '12345'}, 'Server': {'uuid': 'configured-server-uuid'}}
-        with patch('web_app._submit_background_job') as mock_submit:
+        with patch('app.web_app._submit_background_job') as mock_submit:
             resp = self._post_webhook(client, payload)
         assert resp.status_code == 200
         mock_submit.assert_not_called()
@@ -1523,7 +1523,7 @@ class TestPlexWebhook:
         auth = base64.b64encode(b'plex:secret').decode('ascii')
 
         with patch.dict(os.environ, {'WEBHOOK_USERNAME': 'plex', 'WEBHOOK_PASSWORD': 'secret'}, clear=False), \
-             patch('web_app._submit_background_job') as mock_submit:
+             patch('app.web_app._submit_background_job') as mock_submit:
             resp = self._post_webhook(client, payload, headers={'Authorization': f'Basic {auth}'})
 
         assert resp.status_code == 200
@@ -1540,7 +1540,7 @@ class TestPlexWebhook:
         assert resp.status_code == 403
 
     def test_process_library_new_downloads_theme_when_missing(self, tmp_path):
-        import web_app
+        from app import web_app
 
         show_dir = tmp_path / 'New Show (2024)'
         show_dir.mkdir()
@@ -1549,16 +1549,16 @@ class TestPlexWebhook:
         plex = MagicMock()
         plex.library.fetchItem.return_value = show
 
-        with patch('web_app.get_plex', return_value=plex), \
-             patch('web_app._download_plex_theme_to_path') as mock_download, \
-             patch('web_app.send_pushover_notification') as mock_notify:
+        with patch('app.web_app.get_plex', return_value=plex), \
+             patch('app.web_app._download_plex_theme_to_path') as mock_download, \
+             patch('app.web_app.send_pushover_notification') as mock_notify:
             web_app._process_plex_library_new('123')
 
         mock_download.assert_called_once()
         mock_notify.assert_called_once()
 
     def test_process_library_new_skips_when_theme_exists(self, tmp_path):
-        import web_app
+        from app import web_app
 
         show_dir = tmp_path / 'Existing Show (2024)'
         show_dir.mkdir()
@@ -1568,8 +1568,8 @@ class TestPlexWebhook:
         plex = MagicMock()
         plex.library.fetchItem.return_value = show
 
-        with patch('web_app.get_plex', return_value=plex), \
-             patch('web_app._download_plex_theme_to_path') as mock_download:
+        with patch('app.web_app.get_plex', return_value=plex), \
+             patch('app.web_app._download_plex_theme_to_path') as mock_download:
             web_app._process_plex_library_new('123')
 
         mock_download.assert_not_called()
@@ -1582,15 +1582,15 @@ class TestPlexWebhook:
 class TestPushoverNotification:
     def test_no_op_without_config(self):
         """send_pushover_notification does nothing if env vars are missing."""
-        from web_app import send_pushover_notification
-        with patch('web_app.http_requests') as mock_req, \
+        from app.web_app import send_pushover_notification
+        with patch('app.web_app.http_requests') as mock_req, \
              patch.dict(os.environ, {}, clear=True):
             send_pushover_notification('Test', 'body')
             mock_req.post.assert_not_called()
 
     def test_sends_with_config(self):
-        from web_app import send_pushover_notification
-        with patch('web_app.http_requests') as mock_req, \
+        from app.web_app import send_pushover_notification
+        with patch('app.web_app.http_requests') as mock_req, \
              patch.dict(os.environ, {'PUSHOVER_APP_TOKEN': 'tok', 'PUSHOVER_USER_KEY': 'usr'}):
             mock_resp = MagicMock()
             mock_req.post.return_value = mock_resp
@@ -1602,8 +1602,8 @@ class TestPushoverNotification:
         assert data['user'] == 'usr'
 
     def test_handles_request_failure_gracefully(self):
-        from web_app import send_pushover_notification
-        with patch('web_app.http_requests') as mock_req, \
+        from app.web_app import send_pushover_notification
+        with patch('app.web_app.http_requests') as mock_req, \
              patch.dict(os.environ, {'PUSHOVER_APP_TOKEN': 'tok', 'PUSHOVER_USER_KEY': 'usr'}):
             mock_req.post.side_effect = Exception('Network error')
             # Should not raise
@@ -1619,7 +1619,7 @@ class TestPushoverNotification:
         mock_resp.iter_content.return_value = [b'mp3data']
         mock_plex._session.get.return_value = mock_resp
 
-        with patch('web_app.send_pushover_notification') as mock_notif:
+        with patch('app.web_app.send_pushover_notification') as mock_notif:
             resp = client.post('/api/items/1/theme/download', json={'overwrite': False})
         assert resp.status_code == 200
         mock_notif.assert_called_once()
@@ -1636,7 +1636,7 @@ class TestSettingsTestPushover:
         assert 'PUSHOVER_APP_TOKEN' in resp.get_json()['error']
 
     def test_success_with_valid_config(self, client):
-        with patch('web_app.http_requests') as mock_req, \
+        with patch('app.web_app.http_requests') as mock_req, \
              patch.dict(os.environ, {'PUSHOVER_APP_TOKEN': 'tok', 'PUSHOVER_USER_KEY': 'usr'}):
             mock_resp = MagicMock()
             mock_req.post.return_value = mock_resp
@@ -1645,7 +1645,7 @@ class TestSettingsTestPushover:
         assert resp.get_json()['success'] is True
 
     def test_returns_500_on_pushover_error(self, client):
-        with patch('web_app.http_requests') as mock_req, \
+        with patch('app.web_app.http_requests') as mock_req, \
              patch.dict(os.environ, {'PUSHOVER_APP_TOKEN': 'tok', 'PUSHOVER_USER_KEY': 'usr'}):
             mock_req.post.side_effect = Exception('Network error')
             resp = client.post('/api/settings/test-pushover')
@@ -1680,7 +1680,7 @@ class TestSettingsRescan:
         assert data['without_theme'] == 1
 
     def test_rescan_returns_error_on_plex_failure(self, client):
-        with patch('web_app.get_plex', side_effect=Exception('Plex error')):
+        with patch('app.web_app.get_plex', side_effect=Exception('Plex error')):
             resp = client.post('/api/settings/rescan')
         assert resp.status_code == 500
         assert 'error' in resp.get_json()
@@ -1688,7 +1688,7 @@ class TestSettingsRescan:
 
 class TestSettingsRefreshCache:
     def test_refresh_cache_starts_background_warmup(self, client):
-        with patch('web_app._kick_off_cache_warmup') as mock_warmup:
+        with patch('app.web_app._kick_off_cache_warmup') as mock_warmup:
             mock_warmup.return_value = True
             resp = client.post('/api/settings/refresh-cache')
 
@@ -1706,7 +1706,7 @@ class TestApiAuth:
 
     def test_mutating_endpoint_accepts_valid_api_key_header(self, client):
         with patch.dict(os.environ, {'API_KEY': 'secret-key'}), \
-             patch('web_app._kick_off_cache_warmup', return_value=True):
+             patch('app.web_app._kick_off_cache_warmup', return_value=True):
             resp = client.post('/api/settings/refresh-cache', headers={'X-Themarr-Api-Key': 'secret-key'})
         assert resp.status_code == 200
 
@@ -1804,7 +1804,7 @@ class TestDisableAuth:
     def test_disable_auth_allows_mutating_requests(self, app):
         with patch.dict(os.environ, {'DISABLE_AUTH': 'true'}):
             with app.test_client() as c:
-                with patch('web_app._kick_off_cache_warmup', return_value=True):
+                with patch('app.web_app._kick_off_cache_warmup', return_value=True):
                     resp = c.post('/api/settings/refresh-cache')
         assert resp.status_code == 200
 
@@ -1831,7 +1831,7 @@ class TestYoutubeSearchOpts:
 
     def test_youtube_search_opts_do_not_include_remote_components(self):
         """remote_components must never appear in youtube_search ydl_opts (supply-chain RCE)."""
-        import web_app
+        from app import web_app
         # Capture the ydl_opts dict built inside youtube_search by intercepting YoutubeDL.__init__
         captured = {}
         original_init = None
@@ -1846,7 +1846,7 @@ class TestYoutubeSearchOpts:
             def extract_info(self, *a, **kw):
                 return {'entries': []}
 
-        with patch('web_app.yt_dlp.YoutubeDL', CapturingYDL):
+        with patch('app.web_app.yt_dlp.YoutubeDL', CapturingYDL):
             with patch.dict(os.environ, {'DISABLE_AUTH': 'true'}):
                 with web_app.app.test_client() as c:
                     c.get('/api/youtube/search?q=test')
@@ -1860,7 +1860,7 @@ class TestYoutubeSearchOpts:
 
     def test_youtube_search_opts_include_socket_timeout(self):
         """youtube_search ydl_opts should include socket_timeout for reliability."""
-        import web_app
+        from app import web_app
         captured = {}
 
         class CapturingYDL:
@@ -1873,7 +1873,7 @@ class TestYoutubeSearchOpts:
             def extract_info(self, *a, **kw):
                 return {'entries': []}
 
-        with patch('web_app.yt_dlp.YoutubeDL', CapturingYDL):
+        with patch('app.web_app.yt_dlp.YoutubeDL', CapturingYDL):
             with patch.dict(os.environ, {'DISABLE_AUTH': 'true'}):
                 with web_app.app.test_client() as c:
                     c.get('/api/youtube/search?q=test')
@@ -1884,7 +1884,7 @@ class TestYoutubeSearchOpts:
 
     def test_youtube_search_query_length_cap(self):
         """Queries longer than 200 chars should be rejected with 400."""
-        import web_app
+        from app import web_app
         with patch.dict(os.environ, {'DISABLE_AUTH': 'true'}):
             with web_app.app.test_client() as c:
                 resp = c.get(f'/api/youtube/search?q={"a" * 201}')
@@ -2026,7 +2026,7 @@ class TestThemerrDbCacheKey:
     """BUG-002 — ThemerrDB cache key must include item_type to prevent cross-type collisions."""
 
     def test_cache_keys_differ_by_item_type(self):
-        import web_app
+        from app import web_app
         key_movie = web_app._get_themerrdb_cache_key('tt1234567', 'movies')
         key_show = web_app._get_themerrdb_cache_key('tt1234567', 'tv_shows')
         assert key_movie != key_show, (
@@ -2034,7 +2034,7 @@ class TestThemerrDbCacheKey:
         )
 
     def test_cache_key_without_type_is_distinct(self):
-        import web_app
+        from app import web_app
         key_typed = web_app._get_themerrdb_cache_key('tt1234567', 'movies')
         key_untyped = web_app._get_themerrdb_cache_key('tt1234567')
         assert key_typed != key_untyped

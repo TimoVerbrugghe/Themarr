@@ -23,7 +23,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
-COPY web_app.py .
 COPY app/ app/
 COPY templates/ templates/
 COPY static/ static/
@@ -38,4 +37,4 @@ EXPOSE 8080
 USER themarr
 
 # Default: run the Web UI
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "8", "--timeout", "120", "web_app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "8", "--timeout", "120", "app.web_app:app"]

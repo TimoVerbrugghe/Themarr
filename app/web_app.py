@@ -41,11 +41,28 @@ from app.plex_utils import (
 from app.jellyfin_utils import (
     jellyfin_is_configured, get_jellyfin, get_jellyfin_item_local_path, _normalize_provider,
 )
+from app.auth import (
+    _log_generated_api_key_warning, _auth_disabled, _get_ui_credentials,
+    _credentials_auth_configured, _ui_auth_misconfigured, _ui_auth_warning_message,
+    _get_auth_mode, _parse_api_key, _get_api_key, _check_api_request_auth,
+    _check_webhook_basic_auth, _get_settings_env_values,
+)
+from app.cache import (
+    init_cache, invalidate_library_cache as _invalidate_library_cache_impl,
+    get_section_build_lock, set_theme_hydration_total, advance_theme_hydration_progress,
+    mark_theme_hydration_finished, get_theme_hydration_status, get_cached_item,
+    get_cached_poster, set_cached_poster, fetch_poster_bytes, submit_background_job,
+    get_jellyfin_user_id_cached, set_jellyfin_user_id_cached, sync_cached_item,
+    sync_cached_item_theme_state as _sync_cached_item_theme_state_impl,
+    get_library_cache_for_section, set_library_cache_for_section, background_warm_poster_cache,
+)
+from app.notifications import send_pushover_notification
+from app.errors import error_response
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='../templates', static_folder='../static')
 YTDLP_WORKDIR = Path(tempfile.gettempdir()) / 'themarr_yt_dlp_work'
 YTDLP_WORKDIR.mkdir(parents=True, exist_ok=True)
 MAX_BULK_ITEMS = 100
