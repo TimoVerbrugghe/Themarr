@@ -25,7 +25,6 @@ services:
       JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
       JELLYFIN_USER_ID: ${JELLYFIN_USER_ID:-}
       FLASK_DEBUG: ${FLASK_DEBUG:-false}
-      SECRET_KEY: ${SECRET_KEY:-}
       DEFAULT_THEME: ${DEFAULT_THEME:-dark}
       DEFAULT_VIEW: ${DEFAULT_VIEW:-list}
       API_KEY: ${API_KEY:-}

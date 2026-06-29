@@ -64,15 +64,30 @@ Themarr is designed to run with the `docker-compose.yml` in this repository.
 
 ### Important: path mounts must match your media-server container paths
 
-Your mounted library paths in Themarr must match the paths reported by your server items so local `theme.mp3` files are resolved correctly.
+Themarr writes `theme.mp3` files directly to the media library on disk. To locate the right folder, it uses the file-system path that Plex or Jellyfin reports for each item — so Themarr's container must mount the **same host directories** at the **same paths** that your media-server container uses.
 
-Example:
+**Why `TV_SHOWS_HOST_PATH` and `MOVIES_HOST_PATH` exist**
+
+Docker Compose needs to know which host directories to mount at startup. Because every user's library location is different, these two environment variables let you configure the mount points without editing `docker-compose.yml` directly.
+
+The `docker-compose.yml` mounts each path as `<host path>:<same container path>`:
 
 ```yaml
 volumes:
-  - /media/tvshows:/media/tvshows
-  - /media/movies:/media/movies
+  - ${TV_SHOWS_HOST_PATH:-/mnt/tv}:${TV_SHOWS_HOST_PATH:-/mnt/tv}
+  - ${MOVIES_HOST_PATH:-/mnt/movies}:${MOVIES_HOST_PATH:-/mnt/movies}
 ```
+
+Using the same value for source and destination means the absolute path inside Themarr's container matches the path reported by Plex or Jellyfin — which is what lets Themarr resolve and write `theme.mp3` to the right location on disk.
+
+Set these in your `.env` to the host paths where your media lives:
+
+```env
+TV_SHOWS_HOST_PATH=/media/tvshows
+MOVIES_HOST_PATH=/media/movies
+```
+
+These must be the same paths used by your Plex or Jellyfin container. If your media server container mounts `/media/tvshows`, set `TV_SHOWS_HOST_PATH=/media/tvshows`.
 
 ## Environment variables
 
@@ -83,6 +98,8 @@ volumes:
 | `JELLYFIN_URL` | No* | — | Jellyfin server URL (example: `http://192.168.1.50:8096`) |
 | `JELLYFIN_API_KEY` | No* | — | Jellyfin API key |
 | `JELLYFIN_USER_ID` | No | first Jellyfin user | Optional explicit Jellyfin user ID |
+| `TV_SHOWS_HOST_PATH` | No | `/mnt/tv` | Host path to your TV-show library. Used by docker-compose.yml to mount the correct directory into the container at the same path so Themarr can write `theme.mp3` files where Plex/Jellyfin expect them. Must match the path your media server container uses. |
+| `MOVIES_HOST_PATH` | No | `/mnt/movies` | Host path to your movies library. Same purpose as `TV_SHOWS_HOST_PATH` for movies. |
 | `FLASK_DEBUG` | No | `false` | Enables Flask debug mode |
 | `DEFAULT_THEME` | No | `dark` | Default UI theme: `dark` or `light` |
 | `DEFAULT_VIEW` | No | `list` | Default library view: `list` or `grid` |
