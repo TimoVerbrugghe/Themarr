@@ -85,17 +85,35 @@ _MOCK_TV_ITEMS = [
 # ---------------------------------------------------------------------------
 
 def _free_port() -> int:
-    """Return an available TCP port on localhost."""
+    """Return an available TCP port on localhost.
+
+    The port is unbound immediately after discovery.  A brief race window
+    exists between this call and Flask binding the port; ``_launch_flask``
+    retries on failure to handle that edge case.
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
 
 
-def _wait_for_health(port: int, timeout: int = 20) -> None:
-    """Block until ``GET /health`` returns HTTP 200 or *timeout* seconds pass."""
+def _wait_for_health(
+    port: int,
+    proc: subprocess.Popen,
+    timeout: int = 20,
+) -> None:
+    """Block until ``GET /health`` returns HTTP 200 or *timeout* seconds pass.
+
+    Fails fast if *proc* exits before the health check succeeds so that
+    ``_launch_flask`` can retry on a different port without waiting the full
+    *timeout*.
+    """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(
+                f"Flask process exited prematurely with code {proc.returncode}"
+            )
         try:
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
             conn.request("GET", "/health")
@@ -111,34 +129,47 @@ def _wait_for_health(port: int, timeout: int = 20) -> None:
     )
 
 
-def _launch_flask(extra_env: dict) -> tuple[subprocess.Popen, int]:
+def _launch_flask(extra_env: dict, max_attempts: int = 3) -> tuple[subprocess.Popen, int]:
     """Start ``web_app.py`` on a free port and wait until healthy.
+
+    Retries up to *max_attempts* times with a freshly allocated port to
+    handle the small race window between ``_free_port()`` and Flask binding.
 
     Returns the (process, port) pair.  The caller is responsible for
     terminating the process.
     """
-    port = _free_port()
-    env: dict = {
-        "PATH": os.environ.get("PATH", ""),
-        "HOME": os.environ.get("HOME", ""),
-        "PYTHONPATH": str(REPO_ROOT),
-        "FLASK_DEBUG": "false",
-        "PORT": str(port),
-    }
-    env.update(extra_env)
-    proc = subprocess.Popen(
-        [sys.executable, str(REPO_ROOT / "web_app.py")],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        cwd=str(REPO_ROOT),
+    last_error: Exception = RuntimeError("no attempts made")
+    for _ in range(max_attempts):
+        port = _free_port()
+        env: dict = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": os.environ.get("HOME", ""),
+            "PYTHONPATH": str(REPO_ROOT),
+            "FLASK_DEBUG": "false",
+            "PORT": str(port),
+        }
+        env.update(extra_env)
+        proc = subprocess.Popen(
+            [sys.executable, str(REPO_ROOT / "web_app.py")],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=str(REPO_ROOT),
+        )
+        try:
+            _wait_for_health(port, proc)
+            return proc, port
+        except RuntimeError as exc:
+            last_error = exc
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+    raise RuntimeError(
+        f"Flask failed to start after {max_attempts} attempts: {last_error}"
     )
-    try:
-        _wait_for_health(port)
-    except RuntimeError:
-        proc.terminate()
-        raise
-    return proc, port
 
 
 # ---------------------------------------------------------------------------
