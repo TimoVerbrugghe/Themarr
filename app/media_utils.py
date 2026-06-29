@@ -42,8 +42,9 @@ def _validate_local_media_path(local_path):
 def _is_valid_mp3_magic(file_obj) -> bool:
     """Return True when the first bytes of *file_obj* match an MP3 magic signature."""
     try:
+        pos = file_obj.tell()
         header = file_obj.read(3)
-        file_obj.seek(0)
+        file_obj.seek(pos)
         return any(header.startswith(prefix) for prefix in _MP3_MAGIC_PREFIXES)
     except Exception:
         return False
