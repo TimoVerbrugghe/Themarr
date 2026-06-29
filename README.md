@@ -185,19 +185,14 @@ Unlike Plex webhooks, Jellyfin webhook automation only downloads from **ThemerrD
 ### Setup (Jellyfin Webhook plugin)
 
 1. In Jellyfin, install/enable the **Webhook** plugin.
-2. Add a webhook destination URL:
+2. In the Webhook plugin UI, create a new generic webhook destination.
+3. Set the destination URL to:
    ```
    http://<themarr-host>:8080/api/webhooks/jellyfin
    ```
-3. Enable the **ItemAdded** notification.
-4. Use a JSON payload template that includes at least `NotificationType` and `ItemId`, for example:
-   ```json
-   {
-     "NotificationType": "{{NotificationType}}",
-     "ItemId": "{{ItemId}}"
-   }
-   ```
-5. Save and test the webhook.
+4. In the destination's event/notification checkboxes, enable **Item Added**.
+5. Keep the request body format as JSON and leave the payload template at its default plugin values (no custom template required).
+6. Save and test the webhook.
 
 ### Optional webhook hardening
 
