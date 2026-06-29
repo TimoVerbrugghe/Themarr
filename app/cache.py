@@ -7,8 +7,12 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from app.plex_utils import get_plex, plex_session_get, get_section_base_paths
+from app.plex_utils import get_plex, plex_session_get, get_section_base_paths, get_item_local_path
 from app.media_utils import scan_local_theme_dirs, _is_video_file_path
+from app.external_ids import extract_external_ids, extract_jellyfin_external_ids
+from app.jellyfin_utils import get_jellyfin, get_jellyfin_user_id, get_jellyfin_item_local_path, _normalize_provider, jellyfin_session_get, serialize_jellyfin_item
+from app.themerrdb_service import get_themerrdb_theme, get_themerrdb_theme_for_item, get_themerrdb_data_for_context
+from app.theme_state import is_plex_theme_source_unverified
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +190,7 @@ def set_jellyfin_user_id_cached(user_id):
         _jellyfin_user_id_cache['value'] = user_id
 
 
-def sync_cached_item(item_to_dict_fn, item):
+def sync_cached_item(item):
     """Update an item's cached entry in-place after local theme state changes."""
     updated = False
     updated_item = None
@@ -196,7 +200,7 @@ def sync_cached_item(item_to_dict_fn, item):
                 if str(cached_item.get('ratingKey')) == str(item.ratingKey):
                     existing_library_id = cached_item.get('library_id')
                     existing_provider = cached_item.get('provider') or 'plex'
-                    updated_item = item_to_dict_fn(
+                    updated_item = item_to_dict(
                         item,
                         provider=existing_provider,
                         library_id=existing_library_id,
@@ -207,12 +211,15 @@ def sync_cached_item(item_to_dict_fn, item):
             if updated:
                 break
     if updated_item is None:
-        updated_item = item_to_dict_fn(item)
+        updated_item = item_to_dict(item)
     return updated_item, updated
 
 
-def sync_cached_item_theme_state(sync_fn, provider, item_id):
+def sync_cached_item_theme_state(provider, item_id):
     """Refresh has_local_theme/theme_size for a cached item by provider/id."""
+    from app.plex_utils import get_plex
+    
+    provider = _normalize_provider(provider)
     target_id = str(item_id)
     with _library_cache_lock:
         for section_key, section_items in _library_cache.items():
@@ -220,11 +227,33 @@ def sync_cached_item_theme_state(sync_fn, provider, item_id):
                 cached_provider = cached_item.get('provider') or 'plex'
                 if cached_provider != provider or str(cached_item.get('id') or cached_item.get('ratingKey')) != target_id:
                     continue
-                updated = sync_fn(cached_item)
-                if updated:
-                    section_items[idx] = updated
-                    _library_cache[section_key] = section_items
-                    return updated, True
+                local_path = cached_item.get('local_path')
+                theme_size = 0
+                if local_path:
+                    theme_path = Path(local_path) / 'theme.mp3'
+                    if theme_path.exists():
+                        try:
+                            theme_size = theme_path.stat().st_size
+                        except OSError:
+                            theme_size = 0
+                updated = dict(cached_item)
+                updated['has_local_theme'] = theme_size > 0
+                updated['theme_size'] = theme_size
+                updated['plex_theme_source_unverified'] = False
+                if provider == 'plex':
+                    try:
+                        plex = get_plex()
+                        item = plex.fetchItem(int(target_id))
+                        updated['has_plex_theme'] = bool(getattr(item, 'theme', None))
+                        updated['plex_theme_source_unverified'] = is_plex_theme_source_unverified(
+                            item,
+                            updated['has_local_theme'],
+                        )
+                    except Exception as exc:
+                        logger.warning('Unable to refresh Plex source availability for item %s: %s', target_id, exc)
+                section_items[idx] = updated
+                _library_cache[section_key] = section_items
+                return updated, True
     return None, False
 
 
@@ -283,3 +312,134 @@ def background_warm_poster_cache(plex, item_to_dict_fn):
                 warmed += 1
 
     logger.info('Poster cache warmup complete: %d/%d posters cached', warmed, len(items_to_warm))
+
+
+def item_to_dict(item, theme_dirs=None, provider='plex', library_id=None):
+    """Serialize a Plex item to a dict for JSON response.
+
+    If *theme_dirs* is provided (a dict from scan_local_theme_dirs), theme
+    existence is resolved via a dict lookup instead of individual stat() calls.
+    """
+    local_path = get_item_local_path(item)
+    theme_exists = False
+    theme_size = 0
+    if local_path:
+        if theme_dirs is not None:
+            theme_size = theme_dirs.get(str(local_path), 0)
+            theme_exists = theme_size > 0
+        else:
+            theme_path = local_path / 'theme.mp3'
+            if theme_path.exists() and theme_path.stat().st_size > 0:
+                theme_exists = True
+                theme_size = theme_path.stat().st_size
+
+    # Extract external IDs for ThemerrDB availability check
+    external_ids = extract_external_ids(item)
+    has_themerrdb_theme = False
+    if external_ids['imdb'] or external_ids['tvdb'] or external_ids['tmdb']:
+        themerrdb_data = get_themerrdb_theme(item)
+        has_themerrdb_theme = themerrdb_data is not None
+
+    has_plex_theme = bool(getattr(item, 'theme', None))
+    plex_theme_source_unverified = is_plex_theme_source_unverified(item, theme_exists)
+
+    return {
+        'id': str(item.ratingKey),
+        'ratingKey': item.ratingKey,
+        'provider': provider,
+        'library_id': str(library_id) if library_id is not None else None,
+        'title': item.title,
+        'year': getattr(item, 'year', None),
+        'thumb': item.thumb,
+        'type': item.type,
+        'has_plex_theme': has_plex_theme,
+        'plex_theme_source_unverified': plex_theme_source_unverified,
+        'has_local_theme': theme_exists,
+        'has_themerrdb_theme': has_themerrdb_theme,
+        'theme_size': theme_size,
+        'local_path': str(local_path) if local_path else None,
+        'external_ids': external_ids,
+    }
+
+
+def build_library_items(section_id, include_theme_state=True, provider='plex'):
+    """Fetch and return sorted item dicts for a provider library section (no caching)."""
+    started = time.perf_counter()
+    provider = _normalize_provider(provider)
+
+    if provider == 'plex':
+        plex = get_plex()
+        section = plex.library.sectionByID(section_id)
+
+        fetch_started = time.perf_counter()
+        items = section.all()
+        fetch_duration = time.perf_counter() - fetch_started
+
+        if include_theme_state:
+            section_locations = getattr(section, 'locations', None)
+            if isinstance(section_locations, (list, tuple, set)):
+                base_paths = {path for path in section_locations if isinstance(path, str) and path}
+            else:
+                base_paths = set()
+            if not base_paths:
+                base_paths = get_section_base_paths(plex)
+            scan_started = time.perf_counter()
+            theme_dirs = scan_local_theme_dirs(base_paths)
+            scan_duration = time.perf_counter() - scan_started
+        else:
+            theme_dirs = {}
+            scan_duration = 0.0
+
+        logger.info('Checking ThemerrDB availability for %s section %s (%d items)', provider, section_id, len(items))
+        result = [item_to_dict(item, theme_dirs=theme_dirs, provider='plex', library_id=section_id) for item in items]
+    else:
+        jellyfin = get_jellyfin()
+        user_id = get_jellyfin_user_id(jellyfin)
+        fetch_started = time.perf_counter()
+        response = jellyfin_session_get(
+            jellyfin,
+            f'/Users/{user_id}/Items',
+            params={
+                'ParentId': str(section_id),
+                'IncludeItemTypes': 'Series,Movie',
+                'Recursive': 'true',
+                'Fields': 'Path,ProductionYear,ProviderIds',
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        items = payload.get('Items', [])
+        fetch_duration = time.perf_counter() - fetch_started
+
+        if include_theme_state:
+            base_paths = set()
+            for item in items:
+                local_path = get_jellyfin_item_local_path(item)
+                if local_path:
+                    base_paths.add(str(local_path.parent if _is_video_file_path(local_path) else local_path))
+            scan_started = time.perf_counter()
+            theme_dirs = scan_local_theme_dirs(base_paths) if base_paths else {}
+            scan_duration = time.perf_counter() - scan_started
+        else:
+            theme_dirs = {}
+            scan_duration = 0.0
+
+        logger.info('Checking ThemerrDB availability for %s section %s (%d items)', provider, section_id, len(items))
+        result = [
+            serialize_jellyfin_item(item, section_id, theme_dirs=theme_dirs, get_themerrdb_theme_fn=get_themerrdb_theme_for_item)
+            for item in items
+        ]
+
+    result.sort(key=lambda item: item['title'].lower())
+    if include_theme_state:
+        logger.info(
+            'Built %s section %s item payload: %d items (theme scan %.2fs, fetch %.2fs, total %.2fs)',
+            provider, section_id, len(result), scan_duration, fetch_duration, time.perf_counter() - started,
+        )
+    else:
+        logger.info(
+            'Built %s section %s metadata payload: %d items (fetch %.2fs, total %.2fs)',
+            provider, section_id, len(result), fetch_duration, time.perf_counter() - started,
+        )
+    return result
+

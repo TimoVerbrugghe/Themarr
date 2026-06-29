@@ -18,11 +18,14 @@ def app():
     """Create test Flask app."""
     from app import web_app
     from app import themerrdb_service
+    from app.cache import invalidate_library_cache
     web_app.app.config['TESTING'] = True
-    web_app._invalidate_library_cache()
+    invalidate_library_cache()
+    web_app._startup_warmup_started = True  # Prevent middleware from resetting cache on each request
     themerrdb_service._themerrdb_cache.clear()
     yield web_app.app
-    web_app._invalidate_library_cache()
+    invalidate_library_cache()
+    web_app._startup_warmup_started = True  # Reset for next test
     themerrdb_service._themerrdb_cache.clear()
 
 
@@ -41,11 +44,17 @@ def mock_plex():
     """Mock PlexServer."""
     with patch('app.web_app.plex_is_configured', return_value=True):
         with patch('app.web_app.get_plex') as mock_get_plex:
-            plex = MagicMock()
-            plex.friendlyName = 'Test Plex Server'
-            plex.version = '1.0.0'
-            mock_get_plex.return_value = plex
-            yield plex
+            with patch('app.cache.get_plex') as mock_cache_get_plex:
+                with patch('app.webhook_handlers.get_plex') as mock_webhook_get_plex:
+                    with patch('app.bulk_operations.get_plex') as mock_bulk_get_plex:
+                        plex = MagicMock()
+                        plex.friendlyName = 'Test Plex Server'
+                        plex.version = '1.0.0'
+                        mock_get_plex.return_value = plex
+                        mock_cache_get_plex.return_value = plex
+                        mock_webhook_get_plex.return_value = plex
+                        mock_bulk_get_plex.return_value = plex
+                        yield plex
 
 
 def make_mock_show(rating_key=1, title='Test Show', year=2020, has_theme=True, location=None):
@@ -209,12 +218,12 @@ class TestCacheStatus:
 
 class TestCachedThemeStateSync:
     def test_sync_cached_item_theme_state_preserves_plex_source_when_reported(self, tmp_path):
-        from app import web_app
+        from app.cache import _library_cache, sync_cached_item_theme_state
 
         show_dir = tmp_path / 'Test Show (2020)'
         show_dir.mkdir()
         (show_dir / 'theme.mp3').write_bytes(b'local_theme')
-        web_app._library_cache['1'] = [{
+        _library_cache['1'] = [{
             'id': '1',
             'ratingKey': 1,
             'provider': 'plex',
@@ -225,11 +234,13 @@ class TestCachedThemeStateSync:
         }]
 
         mock_item = make_mock_show(rating_key=1, location=str(show_dir), has_theme=True)
-        with patch('app.web_app.get_plex') as mock_get_plex:
-            plex = MagicMock()
-            plex.fetchItem.return_value = mock_item
-            mock_get_plex.return_value = plex
-            updated, found = web_app._sync_cached_item_theme_state('plex', '1')
+        with patch('app.plex_utils.get_plex') as mock_get_plex:
+            with patch('app.theme_state.get_plex') as mock_theme_state_get_plex:
+                plex = MagicMock()
+                plex.fetchItem.return_value = mock_item
+                mock_get_plex.return_value = plex
+                mock_theme_state_get_plex.return_value = plex
+                updated, found = sync_cached_item_theme_state('plex', '1')
 
         assert found is True
         assert updated['has_local_theme'] is True
@@ -537,9 +548,10 @@ class TestLibraryItemsAdditional:
         section.all.return_value = []
         mock_plex.library.sectionByID.return_value = section
 
-        with patch('app.web_app.scan_local_theme_dirs', return_value={}) as mock_scan, \
-             patch('app.web_app.get_section_base_paths', return_value={'/fallback-path'}):
-            web_app._build_library_items(1)
+        with patch('app.media_utils.scan_local_theme_dirs', return_value={}) as mock_scan, \
+             patch('app.plex_utils.get_section_base_paths', return_value={'/fallback-path'}):
+            from app.cache import build_library_items
+            build_library_items(1)
 
         assert mock_scan.call_count == 1
         assert mock_scan.call_args[0][0] == {'/only-this-path'}
@@ -554,7 +566,7 @@ class TestLibraryItemsAdditional:
             'has_plex_theme': False,
             'has_local_theme': False,
         }]
-        with patch('app.web_app._build_library_items', return_value=jellyfin_items):
+        with patch('app.cache.build_library_items', return_value=jellyfin_items):
             resp = client.get('/api/libraries/jellyfin/jf-lib/items')
         assert resp.status_code == 200
         data = resp.get_json()
@@ -1304,9 +1316,9 @@ class TestGetTheme:
 
 class TestPosterCache:
     def test_get_poster_serves_from_in_memory_cache(self, client, mock_plex):
-        from app import web_app
+        from app.cache import set_cached_poster
 
-        web_app._set_cached_poster(1, b'cached_poster', 'image/jpeg')
+        set_cached_poster(1, b'cached_poster', 'image/jpeg', provider='plex')
 
         resp = client.get('/api/poster/1')
         assert resp.status_code == 200
@@ -1314,7 +1326,7 @@ class TestPosterCache:
         mock_plex.fetchItem.assert_not_called()
 
     def test_get_poster_populates_cache_on_first_fetch(self, client, mock_plex):
-        from app import web_app
+        from app.cache import get_cached_poster
 
         show = make_mock_show(rating_key=1)
         mock_plex.fetchItem.return_value = show
@@ -1327,7 +1339,7 @@ class TestPosterCache:
         resp = client.get('/api/poster/1')
         assert resp.status_code == 200
         assert resp.data == b'poster_data'
-        assert web_app._get_cached_poster(1)['content'] == b'poster_data'
+        assert get_cached_poster(1, provider='plex')['content'] == b'poster_data'
 
 
 class TestIndexPage:
@@ -1469,7 +1481,8 @@ class TestPlexWebhook:
         plex = MagicMock()
         plex.machineIdentifier = 'configured-server-uuid'
         with patch('app.web_app.get_plex', return_value=plex):
-            return client.post('/api/webhooks/plex', data={'payload': json.dumps(payload)}, headers=headers or {})
+            with patch('app.webhook_handlers.get_plex', return_value=plex):
+                return client.post('/api/webhooks/plex', data={'payload': json.dumps(payload)}, headers=headers or {})
 
     def test_library_new_event_queues_theme_processing(self, client):
         """library.new event with valid ratingKey queues theme processing."""

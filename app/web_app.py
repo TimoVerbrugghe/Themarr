@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlparse
 
+from functools import partial
 import requests as http_requests
 import yt_dlp
 from flask import Flask, Response, jsonify, render_template, request, send_file, session
@@ -54,6 +55,13 @@ from app.auth import (
 from app.cache import (
     init_cache, get_jellyfin_user_id_cached, set_jellyfin_user_id_cached,
     get_library_cache_for_section, set_library_cache_for_section,
+    invalidate_library_cache, get_section_build_lock, set_theme_hydration_total,
+    advance_theme_hydration_progress, mark_theme_hydration_finished, get_theme_hydration_status,
+    get_cached_item, get_cached_poster, set_cached_poster, fetch_poster_bytes,
+    submit_background_job, sync_cached_item, sync_cached_item_theme_state,
+    item_to_dict, build_library_items,
+    _library_cache_lock, _section_build_locks_lock, _theme_hydration_status_lock,
+    _theme_hydration_status, _library_cache,
 )
 from app.notifications import send_pushover_notification
 from app.errors import error_response
@@ -61,6 +69,13 @@ from app.themerrdb_service import (
     get_themerrdb_theme_for_external_ids, get_themerrdb_theme_for_item, query_themerrdb,
     get_themerrdb_theme, get_themerrdb_data_for_context,
 )
+from app.theme_state import (
+    has_nonempty_theme_file, is_plex_theme_source_unverified,
+    get_external_ids_for_context, check_themerrdb_availability_for_context,
+    check_plex_preview_availability,
+)
+from app.webhook_handlers import check_webhook_server_uuid, process_plex_library_new
+from app.bulk_operations import bulk_download_themes
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -88,27 +103,6 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = (os.getenv('FLASK_DEBUG', 'false').lower() not in {'true', '1', 'yes'})
 
-# In-memory cache for library items, warmed at startup to make first page loads instant.
-_library_cache: dict = {}        # {section_id: [item_dict, ...]}
-_library_cache_lock = threading.Lock()
-_section_build_locks: dict = {}  # {section_id: threading.Lock()}
-_section_build_locks_lock = threading.Lock()
-_poster_cache = OrderedDict()    # {"provider:rating_key": {'content': bytes, 'content_type': str}}
-_poster_cache_lock = threading.Lock()
-_theme_hydration_status = {
-    'running': False,
-    'ready': True,
-    'sections_total': 0,
-    'sections_completed': 0,
-}
-_theme_hydration_status_lock = threading.Lock()
-_background_executor = ThreadPoolExecutor(
-    max_workers=BACKGROUND_WORKER_COUNT,
-    thread_name_prefix='themarr-bg',
-)
-_background_job_lock = threading.Lock()
-_startup_warmup_started = False
-_startup_warmup_lock = threading.Lock()
 _generated_api_key = secrets.token_urlsafe(32)
 _SETTINGS_ENV_VARS = (
     'PLEX_URL',
@@ -132,6 +126,11 @@ _SETTINGS_ENV_VARS = (
 )
 
 
+# Startup warmup flag (runs once per process)
+_startup_warmup_started = False
+_startup_warmup_lock = threading.Lock()
+
+
 # API_KEY initialization logging
 if not (os.getenv('API_KEY') or '').strip():
     _log_generated_api_key_warning()
@@ -148,36 +147,6 @@ elif _startup_auth_mode == 'credentials':
     logger.info('Auth mode: username/password credentials (AUTH_USERNAME + AUTH_PASSWORD).')
 else:
     logger.warning('Auth mode: misconfigured. %s', _ui_auth_warning_message())
-
-
-def _check_webhook_server_uuid(payload):
-    """Validate webhook server UUID against the configured Plex server."""
-    server_info = payload.get('Server') or payload.get('server') or {}
-    if not isinstance(server_info, dict):
-        return jsonify({'error': 'Invalid webhook payload server metadata'}), 400
-    webhook_server_uuid = str(server_info.get('uuid') or '').strip()
-    if not webhook_server_uuid:
-        return jsonify({'error': 'Missing webhook server UUID'}), 400
-
-    try:
-        plex = get_plex()
-    except Exception as exc:
-        logger.warning('Plex webhook: failed to load configured Plex server for UUID check: %s', exc)
-        return jsonify({'error': 'Unable to validate webhook source server'}), 503
-
-    configured_uuid = str(getattr(plex, 'machineIdentifier', '') or '').strip()
-    if not configured_uuid:
-        logger.warning('Plex webhook: configured Plex server did not expose machineIdentifier')
-        return jsonify({'error': 'Unable to validate webhook source server'}), 503
-
-    if not hmac.compare_digest(webhook_server_uuid, configured_uuid):
-        logger.warning(
-            'Plex webhook rejected: server UUID mismatch (received=%s configured=%s)',
-            webhook_server_uuid,
-            configured_uuid,
-        )
-        return jsonify({'error': 'Webhook server UUID mismatch'}), 403
-    return None
 
 
 def _paginate_items(items):
@@ -217,11 +186,10 @@ def _paginate_items(items):
 
 def _submit_background_job(name, fn, *args):
     """Submit work to shared background executor with graceful rejection logging."""
-    try:
-        return _background_executor.submit(fn, *args)
-    except RuntimeError as exc:
-        logger.warning('Failed to queue background job %s: %s', name, exc)
-        return None
+    future = submit_background_job(name, fn, *args)
+    if future is None:
+        logger.warning('Failed to queue background job %s', name)
+    return future
 
 
 def _ensure_startup_warmup():
@@ -232,6 +200,12 @@ def _ensure_startup_warmup():
             return
         _startup_warmup_started = True
     _kick_off_cache_warmup()
+
+
+def _kick_off_cache_warmup():
+    """Invalidate cache and kick off warmup."""
+    invalidate_library_cache()
+    return True
 
 
 def _get_item_context(provider, item_id):
@@ -262,107 +236,6 @@ def _get_item_context(provider, item_id):
         'local_path': local_path,
         'has_plex_theme': False,
     }
-
-
-def _has_nonempty_theme_file(local_path):
-    """Return True when local_path/theme.mp3 exists and is non-empty."""
-    if not local_path:
-        return False
-    theme_path = _theme_file_path(local_path)
-    if not theme_path.exists():
-        return False
-    try:
-        return theme_path.stat().st_size > 0
-    except OSError:
-        return False
-
-
-def _is_plex_theme_source_unverified(item, local_theme_exists=None):
-    """Return True when Plex theme may resolve to an existing local theme file."""
-    has_plex_theme = bool(getattr(item, 'theme', None))
-    if not has_plex_theme:
-        return False
-    if local_theme_exists is None:
-        local_theme_exists = _has_nonempty_theme_file(get_validated_plex_local_path(item))
-    return bool(local_theme_exists)
-
-
-
-
-def _get_external_ids_for_context(context):
-    """Return normalized external IDs for a provider item context."""
-    if context['provider'] == 'plex':
-        return extract_external_ids(context['item'])
-    return extract_jellyfin_external_ids(context['item'])
-
-
-def _check_themerrdb_availability_for_context(context, *, validate_preview=False):
-    """Return availability metadata for a provider item's ThemerrDB theme."""
-    external_ids = _get_external_ids_for_context(context)
-    if not any(external_ids.values()):
-        return {
-            'available': False,
-            'reason': 'No IMDB/TMDB/TVDB identifiers are available for this item.',
-            'external_ids': external_ids,
-        }
-
-    themerrdb_data = get_themerrdb_data_for_context(context)
-    if not themerrdb_data:
-        return {
-            'available': False,
-            'reason': 'No matching theme was found in ThemerrDB.',
-            'external_ids': external_ids,
-        }
-
-    youtube_url = themerrdb_data.get('youtube_theme_url')
-    if not youtube_url:
-        return {
-            'available': False,
-            'reason': 'ThemerrDB did not provide a YouTube theme URL for this item.',
-            'external_ids': external_ids,
-        }
-
-    if validate_preview:
-        try:
-            extract_youtube_audio_url(youtube_url)
-        except yt_dlp.utils.DownloadError as exc:
-            return {
-                'available': False,
-                'reason': f'Theme URL found but preview is unavailable: {_clean_yt_dlp_error(exc)}',
-                'external_ids': external_ids,
-                'youtube_url': youtube_url,
-            }
-
-    return {
-        'available': True,
-        'youtube_url': youtube_url,
-        'external_ids': external_ids,
-    }
-
-
-def _check_plex_preview_availability(item):
-    """Return availability metadata for Plex source theme preview."""
-    if not getattr(item, 'theme', None):
-        return {'available': False, 'reason': 'No theme is available in Plex for this item.'}
-
-    try:
-        plex = get_plex()
-        url = plex.url(item.theme, includeToken=True)
-        response = plex_session_get(plex, url, stream=True, timeout=15)
-        response.raise_for_status()
-        response.close()
-        source_unverified = _is_plex_theme_source_unverified(item)
-        payload = {'available': True, 'source_unverified': source_unverified}
-        if source_unverified:
-            payload['reason'] = (
-                'Plex reports a theme, but this item already has a local theme.mp3. '
-                'Plex may be streaming that local file instead of a Plex-hosted source.'
-            )
-        return payload
-    except Exception as exc:
-        logger.warning('Unable to stream Plex preview for item %s: %s', getattr(item, 'ratingKey', '?'), exc)
-        return {'available': False, 'reason': 'Unable to stream the Plex preview right now.'}
-
 
 
 def is_valid_upload(upload_file):
@@ -409,321 +282,26 @@ def _download_plex_theme_to_path(plex, item, theme_path):
     return True
 
 
-def item_to_dict(item, theme_dirs=None, provider='plex', library_id=None):
-    """Serialize a Plex item to a dict for JSON response.
-
-    If *theme_dirs* is provided (a dict from scan_local_theme_dirs), theme
-    existence is resolved via a dict lookup instead of individual stat() calls.
-    """
-    local_path = get_item_local_path(item)
-    theme_exists = False
-    theme_size = 0
-    if local_path:
-        if theme_dirs is not None:
-            theme_size = theme_dirs.get(str(local_path), 0)
-            theme_exists = theme_size > 0
-        else:
-            theme_path = local_path / 'theme.mp3'
-            if theme_path.exists() and theme_path.stat().st_size > 0:
-                theme_exists = True
-                theme_size = theme_path.stat().st_size
-
-    # Extract external IDs for ThemerrDB availability check
-    external_ids = extract_external_ids(item)
-    has_themerrdb_theme = False
-    if external_ids['imdb'] or external_ids['tvdb'] or external_ids['tmdb']:
-        themerrdb_data = get_themerrdb_theme(item)
-        has_themerrdb_theme = themerrdb_data is not None
-
-    has_plex_theme = bool(getattr(item, 'theme', None))
-    plex_theme_source_unverified = _is_plex_theme_source_unverified(item, theme_exists)
-
-    return {
-        'id': str(item.ratingKey),
-        'ratingKey': item.ratingKey,
-        'provider': provider,
-        'library_id': str(library_id) if library_id is not None else None,
-        'title': item.title,
-        'year': getattr(item, 'year', None),
-        'thumb': item.thumb,
-        'type': item.type,
-        'has_plex_theme': has_plex_theme,
-        'plex_theme_source_unverified': plex_theme_source_unverified,
-        'has_local_theme': theme_exists,
-        'has_themerrdb_theme': has_themerrdb_theme,
-        'theme_size': theme_size,
-        'local_path': str(local_path) if local_path else None,
-        'external_ids': external_ids,
-    }
-
-
 
 # ============================================================
-# Library item cache
 # ============================================================
 
-def _build_library_items(section_id, include_theme_state=True, provider='plex'):
-    """Fetch and return sorted item dicts for a provider library section (no caching)."""
-    started = time.perf_counter()
-    provider = _normalize_provider(provider)
-
-    if provider == 'plex':
-        plex = get_plex()
-        section = plex.library.sectionByID(section_id)
-
-        fetch_started = time.perf_counter()
-        items = section.all()
-        fetch_duration = time.perf_counter() - fetch_started
-
-        if include_theme_state:
-            section_locations = getattr(section, 'locations', None)
-            if isinstance(section_locations, (list, tuple, set)):
-                base_paths = {path for path in section_locations if isinstance(path, str) and path}
-            else:
-                base_paths = set()
-            if not base_paths:
-                base_paths = get_section_base_paths(plex)
-            scan_started = time.perf_counter()
-            theme_dirs = scan_local_theme_dirs(base_paths)
-            scan_duration = time.perf_counter() - scan_started
-        else:
-            theme_dirs = {}
-            scan_duration = 0.0
-
-        logger.info('Checking ThemerrDB availability for %s section %s (%d items)', provider, section_id, len(items))
-        result = [item_to_dict(item, theme_dirs=theme_dirs, provider='plex', library_id=section_id) for item in items]
-    else:
-        jellyfin = get_jellyfin()
-        user_id = get_jellyfin_user_id(jellyfin)
-        fetch_started = time.perf_counter()
-        response = jellyfin_session_get(
-            jellyfin,
-            f'/Users/{user_id}/Items',
-            params={
-                'ParentId': str(section_id),
-                'IncludeItemTypes': 'Series,Movie',
-                'Recursive': 'true',
-                'Fields': 'Path,ProductionYear,ProviderIds',
-            },
-        )
-        response.raise_for_status()
-        payload = response.json()
-        items = payload.get('Items', [])
-        fetch_duration = time.perf_counter() - fetch_started
-
-        if include_theme_state:
-            base_paths = set()
-            for item in items:
-                local_path = get_jellyfin_item_local_path(item)
-                if local_path:
-                    base_paths.add(str(local_path.parent if _is_video_file_path(local_path) else local_path))
-            scan_started = time.perf_counter()
-            theme_dirs = scan_local_theme_dirs(base_paths) if base_paths else {}
-            scan_duration = time.perf_counter() - scan_started
-        else:
-            theme_dirs = {}
-            scan_duration = 0.0
-
-        logger.info('Checking ThemerrDB availability for %s section %s (%d items)', provider, section_id, len(items))
-        result = [
-            serialize_jellyfin_item(item, section_id, theme_dirs=theme_dirs, get_themerrdb_theme_fn=get_themerrdb_theme_for_item)
-            for item in items
-        ]
-
-    result.sort(key=lambda item: item['title'].lower())
-    if include_theme_state:
-        logger.info(
-            'Built %s section %s item payload: %d items (theme scan %.2fs, fetch %.2fs, total %.2fs)',
-            provider, section_id, len(result), scan_duration, fetch_duration, time.perf_counter() - started,
-        )
-    else:
-        logger.info(
-            'Built %s section %s metadata payload: %d items (fetch %.2fs, total %.2fs)',
-            provider, section_id, len(result), fetch_duration, time.perf_counter() - started,
-        )
-    return result
+# Theme download helpers
+# ============================================================
 
 
-def _invalidate_library_cache():
-    """Drop all cached libraries/posters so the next fetch re-queries Plex."""
-    with _library_cache_lock:
-        _library_cache.clear()
-    with _poster_cache_lock:
-        _poster_cache.clear()
-    reset_jellyfin_user_id_cache()
-    with _theme_hydration_status_lock:
-        _theme_hydration_status.update({
-            'running': True,
-            'ready': False,
-            'sections_total': 0,
-            'sections_completed': 0,
-        })
-
-
-def _get_section_build_lock(section_id):
-    """Return a per-section lock to avoid duplicate cache builds under load."""
-    section_id = str(section_id)
-    with _section_build_locks_lock:
-        section_lock = _section_build_locks.get(section_id)
-        if section_lock is None:
-            section_lock = threading.Lock()
-            _section_build_locks[section_id] = section_lock
-    return section_lock
-
-
-def _set_theme_hydration_total(sections_total):
-    with _theme_hydration_status_lock:
-        _theme_hydration_status.update({
-            'running': True,
-            'ready': False,
-            'sections_total': sections_total,
-            'sections_completed': 0,
-        })
-
-
-def _advance_theme_hydration_progress():
-    with _theme_hydration_status_lock:
-        completed = min(
-            _theme_hydration_status.get('sections_total', 0),
-            _theme_hydration_status.get('sections_completed', 0) + 1,
-        )
-        _theme_hydration_status['sections_completed'] = completed
-        total = _theme_hydration_status.get('sections_total', 0)
-        if total > 0 and completed >= total:
-            _theme_hydration_status['running'] = False
-            _theme_hydration_status['ready'] = True
-
-
-def _mark_theme_hydration_finished():
-    with _theme_hydration_status_lock:
-        _theme_hydration_status['running'] = False
-        _theme_hydration_status['ready'] = True
-        _theme_hydration_status['sections_completed'] = _theme_hydration_status.get('sections_total', 0)
-
-
-def _get_theme_hydration_status():
-    with _theme_hydration_status_lock:
-        return dict(_theme_hydration_status)
-
-
-def _get_cached_item(rating_key, provider=None):
-    """Return a cached item dict by ratingKey and optional provider, or None."""
-    target = str(rating_key)
-    provider = (provider or '').strip().lower() or None
-    with _library_cache_lock:
-        for section_items in _library_cache.values():
-            for cached_item in section_items:
-                if str(cached_item.get('ratingKey')) != target:
-                    continue
-                if provider and (cached_item.get('provider') or 'plex') != provider:
-                    continue
-                return cached_item
-    return None
-
-
-def _get_cached_poster(rating_key, provider='plex'):
-    """Return cached poster payload dict for *(provider, rating_key)*, or None."""
-    cache_key = f'{provider}:{rating_key}'
-    with _poster_cache_lock:
-        cached = _poster_cache.get(cache_key)
-        if cached is None:
-            return None
-        _poster_cache.move_to_end(cache_key)
-        return cached
-
-
-def _set_cached_poster(rating_key, content, content_type, provider='plex'):
-    """Store poster bytes in the in-memory poster cache."""
-    cache_key = f'{provider}:{rating_key}'
-    with _poster_cache_lock:
-        _poster_cache[cache_key] = {
-            'content': content,
-            'content_type': content_type,
-        }
-        _poster_cache.move_to_end(cache_key)
-        while len(_poster_cache) > POSTER_CACHE_MAX_ITEMS:
-            _poster_cache.popitem(last=False)
-
-
-def _fetch_poster_bytes(plex, thumb, timeout=10):
-    """Fetch poster bytes for a Plex thumb path."""
-    url = plex.url(thumb, includeToken=True)
-    response = plex_session_get(plex, url, stream=True, timeout=timeout)
+def _download_plex_theme_to_path(plex, item, theme_path):
+    """Download Plex theme for *item* and save to *theme_path*. Returns True on success."""
+    url = plex.url(item.theme, includeToken=True)
+    response = plex_session_get(plex, url, stream=True, timeout=30)
     response.raise_for_status()
-    content_type = response.headers.get('content-type', 'image/jpeg')
-    return response.content, content_type
-
-
-def _sync_cached_item(item):
-    """Update an item's cached entry in-place after local theme state changes."""
-    updated = False
-    updated_item = None
-    with _library_cache_lock:
-        for section_items in _library_cache.values():
-            for index, cached_item in enumerate(section_items):
-                if str(cached_item.get('ratingKey')) == str(item.ratingKey):
-                    # Preserve library_id and provider from the existing cached entry
-                    # so that _sync_cached_item never overwrites them with None defaults.
-                    existing_library_id = cached_item.get('library_id')
-                    existing_provider = cached_item.get('provider') or 'plex'
-                    updated_item = item_to_dict(
-                        item,
-                        provider=existing_provider,
-                        library_id=existing_library_id,
-                    )
-                    section_items[index] = updated_item
-                    updated = True
-                    break
-            if updated:
-                break
-    if updated_item is None:
-        updated_item = item_to_dict(item)
-    return updated_item, updated
-
-
-def _sync_cached_item_theme_state(provider, item_id):
-    """Refresh has_local_theme/theme_size for a cached item by provider/id."""
-    provider = _normalize_provider(provider)
-    target_id = str(item_id)
-    with _library_cache_lock:
-        for section_key, section_items in _library_cache.items():
-            for idx, cached_item in enumerate(section_items):
-                cached_provider = cached_item.get('provider') or 'plex'
-                if cached_provider != provider or str(cached_item.get('id') or cached_item.get('ratingKey')) != target_id:
-                    continue
-                local_path = cached_item.get('local_path')
-                theme_size = 0
-                if local_path:
-                    theme_path = Path(local_path) / 'theme.mp3'
-                    if theme_path.exists():
-                        try:
-                            theme_size = theme_path.stat().st_size
-                        except OSError:
-                            theme_size = 0
-                updated = dict(cached_item)
-                updated['has_local_theme'] = theme_size > 0
-                updated['theme_size'] = theme_size
-                updated['plex_theme_source_unverified'] = False
-                if provider == 'plex':
-                    try:
-                        plex = get_plex()
-                        item = plex.fetchItem(int(target_id))
-                        updated['has_plex_theme'] = bool(getattr(item, 'theme', None))
-                        updated['plex_theme_source_unverified'] = _is_plex_theme_source_unverified(
-                            item,
-                            updated['has_local_theme'],
-                        )
-                    except Exception as exc:
-                        logger.warning('Unable to refresh Plex source availability for item %s: %s', target_id, exc)
-                section_items[idx] = updated
-                _library_cache[section_key] = section_items
-                return updated, True
-    return None, False
-
-
-def _kick_off_cache_warmup():
-    """Invalidate cache in background. (Async cache warming was removed as unused code.)"""
-    _invalidate_library_cache()
+    theme_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(theme_path, 'wb') as fh:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                fh.write(chunk)
+    logger.info('Downloaded Plex theme for %s to %s', item.title, theme_path)
+    return True
 
 
 @app.route('/')
@@ -1018,28 +596,25 @@ def get_libraries():
 @app.route('/api/cache/status')
 def get_cache_status():
     """Return startup cache/hydration status for the Web UI startup overlay."""
-    status = _get_theme_hydration_status()
+    status = get_theme_hydration_status()
     return jsonify(status)
 
 
 @app.route('/api/libraries/<int:section_id>/items')
 def get_library_items(section_id):
     """Return all items in a library section, served from cache when available."""
-    with _library_cache_lock:
-        cached = _library_cache.get(section_id)
+    cached = get_library_cache_for_section(section_id)
     if cached is not None:
         return jsonify(_paginate_items(cached))
 
-    section_lock = _get_section_build_lock(section_id)
+    section_lock = get_section_build_lock(section_id)
     with section_lock:
-        with _library_cache_lock:
-            cached = _library_cache.get(section_id)
+        cached = get_library_cache_for_section(section_id)
         if cached is not None:
             return jsonify(_paginate_items(cached))
         try:
-            result = _build_library_items(section_id, provider='plex')
-            with _library_cache_lock:
-                _library_cache[section_id] = result
+            result = build_library_items(section_id, provider='plex')
+            set_library_cache_for_section(section_id, result)
             return jsonify(_paginate_items(result))
         except Exception as exc:
             return error_response(f'Failed to get items for section {section_id}', exc=exc)
@@ -1061,21 +636,18 @@ def get_library_items_by_provider(provider, section_id):
         return get_library_items(plex_section_id)
 
     cache_key = f'jellyfin:{section_id}'
-    with _library_cache_lock:
-        cached = _library_cache.get(cache_key)
+    cached = get_library_cache_for_section(cache_key)
     if cached is not None:
         return jsonify(_paginate_items(cached))
 
-    section_lock = _get_section_build_lock(cache_key)
+    section_lock = get_section_build_lock(cache_key)
     with section_lock:
-        with _library_cache_lock:
-            cached = _library_cache.get(cache_key)
+        cached = get_library_cache_for_section(cache_key)
         if cached is not None:
             return jsonify(_paginate_items(cached))
         try:
-            result = _build_library_items(section_id, provider='jellyfin')
-            with _library_cache_lock:
-                _library_cache[cache_key] = result
+            result = build_library_items(section_id, provider='jellyfin')
+            set_library_cache_for_section(cache_key, result)
             return jsonify(_paginate_items(result))
         except Exception as exc:
             return error_response(f'Failed to get items for {provider} section {section_id}', exc=exc)
@@ -1085,12 +657,12 @@ def get_library_items_by_provider(provider, section_id):
 def get_poster(rating_key):
     """Proxy Plex poster image to avoid CORS/token issues in browser."""
     try:
-        cached_poster = _get_cached_poster(rating_key, provider='plex')
+        cached_poster = get_cached_poster(rating_key, provider='plex')
         if cached_poster is not None:
             return Response(cached_poster['content'], mimetype=cached_poster['content_type'])
 
         plex = get_plex()
-        cached_item = _get_cached_item(rating_key, provider='plex')
+        cached_item = get_cached_item(rating_key, provider='plex')
         thumb = cached_item.get('thumb') if cached_item else None
         if not thumb:
             item = plex.fetchItem(rating_key)
@@ -1099,8 +671,8 @@ def get_poster(rating_key):
         if not thumb:
             return jsonify({'error': 'No poster available'}), 404
 
-        content, content_type = _fetch_poster_bytes(plex, thumb, timeout=10)
-        _set_cached_poster(rating_key, content, content_type, provider='plex')
+        content, content_type = fetch_poster_bytes(plex, thumb, timeout=10)
+        set_cached_poster(rating_key, content, content_type, provider='plex')
         return Response(content, mimetype=content_type)
     except Exception as exc:
         return error_response(f'Failed to get poster for {rating_key}', exc=exc)
@@ -1121,7 +693,7 @@ def get_provider_poster(provider, item_id):
             return error_response('Plex item id must be an integer', status_code=400, exc=exc)
 
     try:
-        cached_poster = _get_cached_poster(item_id, provider='jellyfin')
+        cached_poster = get_cached_poster(item_id, provider='jellyfin')
         if cached_poster is not None:
             return Response(cached_poster['content'], mimetype=cached_poster['content_type'])
 
@@ -1129,7 +701,7 @@ def get_provider_poster(provider, item_id):
         response = jellyfin_session_get(jellyfin, f'/Items/{item_id}/Images/Primary')
         response.raise_for_status()
         content_type = response.headers.get('content-type', 'image/jpeg')
-        _set_cached_poster(item_id, response.content, content_type, provider='jellyfin')
+        set_cached_poster(item_id, response.content, content_type, provider='jellyfin')
         return Response(response.content, mimetype=content_type)
     except Exception as exc:
         return error_response(f'Failed to get poster for {provider} item {item_id}', exc=exc)
@@ -1205,7 +777,7 @@ def download_theme_from_plex(rating_key):
 
         logger.info('Downloaded theme for %s to %s', item.title, theme_path)
         send_pushover_notification('Theme Downloaded', f'{item.title} theme downloaded from Plex')
-        item_dict, _ = _sync_cached_item(item)
+        item_dict, _ = sync_cached_item(item)
         return jsonify({'success': True, 'path': str(theme_path), 'item': item_dict})
     except Exception as exc:
         return error_response(f'Failed to download theme from Plex for {rating_key}', exc=exc)
@@ -1258,7 +830,7 @@ def copy_theme_from_item(rating_key):
             source_item.title, source_theme_path, target_item.title, target_theme_path,
         )
         send_pushover_notification('Theme Copied', f'{target_item.title} theme copied from {source_item.title}')
-        item_dict, _ = _sync_cached_item(target_item)
+        item_dict, _ = sync_cached_item(target_item)
         return jsonify({'success': True, 'path': str(target_theme_path), 'item': item_dict})
     except Exception as exc:
         return error_response(f'Failed to copy theme for {rating_key}', exc=exc)
@@ -1303,7 +875,7 @@ def upload_theme(rating_key):
 
         logger.info('Uploaded theme for %s to %s', item.title, theme_path)
         send_pushover_notification('Theme Uploaded', f'{item.title} theme uploaded')
-        item_dict, _ = _sync_cached_item(item)
+        item_dict, _ = sync_cached_item(item)
         return jsonify({'success': True, 'path': str(theme_path), 'item': item_dict})
     except Exception as exc:
         return error_response(f'Failed to upload theme for {rating_key}', exc=exc)
@@ -1397,7 +969,7 @@ def download_from_youtube(rating_key):
 
         logger.info('Downloaded YouTube theme for %s to %s', item.title, theme_path)
         send_pushover_notification('Theme Downloaded', f'{item.title} theme downloaded from YouTube')
-        item_dict, _ = _sync_cached_item(item)
+        item_dict, _ = sync_cached_item(item)
         return jsonify({'success': True, 'path': str(theme_path), 'item': item_dict})
     except yt_dlp.utils.DownloadError as exc:
         msg = _clean_yt_dlp_error(exc)
@@ -1417,7 +989,7 @@ def check_themerrdb_availability(rating_key):
             'provider': 'plex',
             'item': item,
         }
-        return jsonify(_check_themerrdb_availability_for_context(context, validate_preview=True))
+        return jsonify(check_themerrdb_availability_for_context(context, validate_preview=True))
     except http_requests.exceptions.RequestException as exc:
         logger.warning('Failed to check ThemerrDB availability for Plex item %s: %s', rating_key, exc)
         return jsonify({'available': False, 'reason': 'Could not reach provider metadata.'})
@@ -1497,7 +1069,7 @@ def download_from_themerrdb(rating_key):
         
         logger.info('Downloaded ThemerrDB theme for %s to %s', item.title, theme_path)
         send_pushover_notification('Theme Downloaded', f'{item.title} theme downloaded from ThemerrDB')
-        item_dict, _ = _sync_cached_item(item)
+        item_dict, _ = sync_cached_item(item)
         return jsonify({'success': True, 'path': str(theme_path), 'item': item_dict})
     except yt_dlp.utils.DownloadError as exc:
         msg = _clean_yt_dlp_error(exc)
@@ -1521,7 +1093,7 @@ def delete_theme(rating_key):
             return jsonify({'error': 'No theme file to delete'}), 404
         theme_path.unlink()
         logger.info('Deleted theme for %s', item.title)
-        item_dict, _ = _sync_cached_item(item)
+        item_dict, _ = sync_cached_item(item)
         return jsonify({'success': True, 'item': item_dict})
     except Exception as exc:
         return error_response(f'Failed to delete theme for {rating_key}', exc=exc)
@@ -1571,7 +1143,7 @@ def check_provider_theme_preview(provider, item_id):
             return jsonify({'available': False, 'reason': 'Theme preview from provider source is only supported for Plex items.'})
 
         context = _get_item_context(provider, item_id)
-        return jsonify(_check_plex_preview_availability(context['item']))
+        return jsonify(check_plex_preview_availability(context['item']))
     except http_requests.exceptions.RequestException as exc:
         logger.warning('Failed to check preview availability for %s item %s: %s', provider, item_id, exc)
         return jsonify({'available': False, 'reason': 'Could not reach provider to validate preview.'})
@@ -1603,7 +1175,7 @@ def check_provider_themerrdb_availability(provider, item_id):
     try:
         provider = _normalize_provider(provider)
         context = _get_item_context(provider, item_id)
-        return jsonify(_check_themerrdb_availability_for_context(context, validate_preview=True))
+        return jsonify(check_themerrdb_availability_for_context(context, validate_preview=True))
     except http_requests.exceptions.RequestException as exc:
         logger.warning('Failed to check ThemerrDB availability for %s item %s: %s', provider, item_id, exc)
         return jsonify({'available': False, 'reason': 'Could not reach provider metadata.'})
@@ -1684,7 +1256,7 @@ def download_provider_from_themerrdb(provider, item_id):
 
         logger.info('Downloaded ThemerrDB theme for %s item', provider)
         send_pushover_notification('Theme Downloaded', f"{context['title']} theme downloaded from ThemerrDB")
-        item_dict, _ = _sync_cached_item_theme_state(provider, item_id)
+        item_dict, _ = sync_cached_item_theme_state(provider, item_id)
         return jsonify({'success': True, 'path': str(theme_path), 'item': item_dict})
     except yt_dlp.utils.DownloadError as exc:
         msg = _clean_yt_dlp_error(exc)
@@ -1740,7 +1312,7 @@ def copy_provider_theme_from_item(provider, item_id):
             'Theme Copied',
             f"{target_context['title']} theme copied from {source_context['title']}",
         )
-        item_dict, _ = _sync_cached_item_theme_state(provider, item_id)
+        item_dict, _ = sync_cached_item_theme_state(provider, item_id)
         return jsonify({'success': True, 'path': str(target_theme_path), 'item': item_dict})
     except ValueError as exc:
         return error_response('Invalid provider or item identifier', status_code=400, exc=exc)
@@ -1785,7 +1357,7 @@ def upload_provider_theme(provider, item_id):
 
         logger.info('Uploaded theme for %s item', provider)
         send_pushover_notification('Theme Uploaded', f"{context['title']} theme uploaded")
-        item_dict, _ = _sync_cached_item_theme_state(provider, item_id)
+        item_dict, _ = sync_cached_item_theme_state(provider, item_id)
         return jsonify({'success': True, 'path': str(theme_path), 'item': item_dict})
     except ValueError as exc:
         return error_response('Invalid provider or item identifier', status_code=400, exc=exc)
@@ -1824,7 +1396,7 @@ def download_provider_from_youtube(provider, item_id):
 
         logger.info('Downloaded YouTube theme for %s item', provider)
         send_pushover_notification('Theme Downloaded', f"{context['title']} theme downloaded from YouTube")
-        item_dict, _ = _sync_cached_item_theme_state(provider, item_id)
+        item_dict, _ = sync_cached_item_theme_state(provider, item_id)
         return jsonify({'success': True, 'path': str(theme_path), 'item': item_dict})
     except yt_dlp.utils.DownloadError as exc:
         msg = _clean_yt_dlp_error(exc)
@@ -1850,7 +1422,7 @@ def delete_provider_theme(provider, item_id):
             return jsonify({'error': 'No theme file to delete'}), 404
         theme_path.unlink()
         logger.info('Deleted theme for %s item %s', provider, item_id)
-        item_dict, _ = _sync_cached_item_theme_state(provider, item_id)
+        item_dict, _ = sync_cached_item_theme_state(provider, item_id)
         return jsonify({'success': True, 'item': item_dict})
     except ValueError as exc:
         return error_response('Invalid provider or item identifier', status_code=400, exc=exc)
@@ -1863,120 +1435,14 @@ def delete_provider_theme(provider, item_id):
 # ============================================================
 
 @app.route('/api/bulk/theme/download', methods=['POST'])
-def bulk_download_themes():
-    """Download themes for multiple Plex items in one request."""
-    data = request.get_json(silent=True)
-    if not data or not isinstance(data.get('ratingKeys'), list):
-        return jsonify({'error': 'ratingKeys (list) is required'}), 400
-
-    rating_keys = data['ratingKeys']
-    overwrite = data.get('overwrite', False)
-
-    if not rating_keys:
-        return jsonify({'error': 'ratingKeys list is empty'}), 400
-    if len(rating_keys) > MAX_BULK_ITEMS:
-        return jsonify({'error': f'Maximum {MAX_BULK_ITEMS} items per bulk operation'}), 400
-
-    try:
-        plex = get_plex()
-    except Exception as exc:
-        return error_response('Failed to connect to Plex', exc=exc)
-
-    results = {'success': [], 'skipped': [], 'no_theme': [], 'failed': []}
-
-    for rating_key in rating_keys:
-        try:
-            item = plex.fetchItem(int(rating_key))
-
-            if not getattr(item, 'theme', None):
-                results['no_theme'].append({'ratingKey': rating_key, 'title': item.title})
-                continue
-
-            local_path = get_validated_plex_local_path(item)
-            if not local_path:
-                results['failed'].append({
-                    'ratingKey': rating_key,
-                    'title': getattr(item, 'title', '?'),
-                    'error': 'Cannot determine local path',
-                })
-                continue
-
-            theme_path = _theme_file_path(local_path)
-
-            if theme_path.exists() and theme_path.stat().st_size > 0 and not overwrite:
-                results['skipped'].append({'ratingKey': rating_key, 'title': item.title})
-                continue
-
-            url = plex.url(item.theme, includeToken=True)
-            response = plex_session_get(plex, url, stream=True, timeout=30)
-            response.raise_for_status()
-
-            local_path.mkdir(parents=True, exist_ok=True)
-            with open(theme_path, 'wb') as fh:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        fh.write(chunk)
-
-            results['success'].append({'ratingKey': rating_key, 'title': item.title})
-            _sync_cached_item(item)
-            logger.info('Bulk: downloaded theme for %s', item.title)
-
-        except Exception as exc:
-            results['failed'].append({'ratingKey': rating_key, 'error': str(exc)})
-
-    if results['success']:
-        titles = ', '.join(r['title'] for r in results['success'][:5])
-        extra = len(results['success']) - 5
-        msg = f"{titles}{f' and {extra} more' if extra > 0 else ''}"
-        send_pushover_notification(
-            title=f"Themes Downloaded ({len(results['success'])})",
-            message=msg,
-        )
-
-    return jsonify(results)
+def bulk_download_themes_route():
+    """Route handler for bulk theme download."""
+    return bulk_download_themes()
 
 
 # ============================================================
 # Webhook Helpers — Plex
 # ============================================================
-
-def _process_plex_library_new(rating_key):
-    """Process a Plex library.new webhook event by downloading theme if needed.
-    
-    Retrieves the item from Plex by rating key, checks if theme.mp3 already exists,
-    and downloads the Plex theme if available.
-    """
-    try:
-        plex = get_plex()
-        item = plex.library.fetchItem(int(rating_key))
-        
-        logger.info("Plex webhook: processing new item '%s' (ratingKey=%s)", item.title, rating_key)
-        
-        if not getattr(item, 'theme', None):
-            logger.info("Plex webhook: '%s' has no theme in Plex — nothing to download", item.title)
-            return
-        
-        local_path = get_validated_plex_local_path(item)
-        if not local_path:
-            logger.warning("Plex webhook: cannot determine local path for '%s'", item.title)
-            return
-        
-        theme_path = _theme_file_path(local_path)
-        if theme_path.exists() and theme_path.stat().st_size > 0:
-            logger.info("Plex webhook: '%s' already has a theme file", item.title)
-            return
-        
-        _download_plex_theme_to_path(plex, item, theme_path)
-        send_pushover_notification(
-            title='Theme Downloaded',
-            message=f'{item.title} theme auto-downloaded via Plex webhook',
-        )
-    except Exception as exc:
-        logger.error("Plex webhook: failed to process item %s: %s", rating_key, exc)
-        send_pushover_notification(
-            title='Theme Download Failed',
-            message=f'Failed to process Plex webhook for item {rating_key}',
-        )
 
 
 # ============================================================
@@ -2005,7 +1471,7 @@ def plex_webhook():
         logger.warning('Plex webhook: invalid JSON payload')
         return jsonify({'success': True}), 200
 
-    server_validation_error = _check_webhook_server_uuid(payload)
+    server_validation_error = check_webhook_server_uuid(payload)
     if server_validation_error:
         return server_validation_error
     
@@ -2019,7 +1485,8 @@ def plex_webhook():
         
         rating_key = metadata.get('ratingKey')
         if rating_key:
-            future = _submit_background_job(f'webhook-plex-{rating_key}', _process_plex_library_new, rating_key)
+            fn = partial(process_plex_library_new, download_plex_theme_fn=_download_plex_theme_to_path)
+            future = _submit_background_job(f'webhook-plex-{rating_key}', fn, rating_key)
             if future is None:
                 logger.warning('Plex webhook: failed to queue processing for ratingKey=%s', rating_key)
             else:
