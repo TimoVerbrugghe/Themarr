@@ -85,6 +85,30 @@ Primary environment variables are defined in `.env.example`:
 - **yt-dlp**: `remote_components` must NOT be enabled (supply-chain risk — fetches and executes JS from GitHub at runtime).
 - **ThemerrDB URLs**: always validate with `is_valid_youtube_url()` before passing to yt-dlp.
 
+## CSP Testing Rules
+
+When writing tests that verify CSP `img-src` (or any other CSP directive) contains a specific host:
+
+- **Do not use `urlparse` + `in` operator** on URL-derived data. CodeQL's
+  `py/incomplete-url-substring-sanitization` rule flags any `in` check on
+  URL-parsed values, regardless of how the data is structured (string or list).
+- **Use exact `==` equality via `any()`** to compare CSP source tokens:
+
+  ```python
+  # CORRECT — exact token equality, no URL parsing
+  img_src_sources = directives.get('img-src', [])
+  assert any(source == 'https://i.ytimg.com' for source in img_src_sources)
+
+  # WRONG — triggers CodeQL py/incomplete-url-substring-sanitization
+  assert 'i.ytimg.com' in img_src_hosts          # in on URL-derived list
+  assert 'https://i.ytimg.com' in csp_string     # in on raw string
+  ```
+
+- CSP origin sources (e.g. `https://i.ytimg.com`) match the scheme, host, and
+  port only — they permit **any path** under that origin. A test that asserts
+  the token `https://i.ytimg.com` is present is sufficient to confirm all URLs
+  like `https://i.ytimg.com/vi/abc123/hq720.jpg` will be allowed by the browser.
+
 ## Screenshot Rule
 
 **Do not generate or commit screenshots during normal agent coding/testing

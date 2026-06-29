@@ -67,6 +67,24 @@ use CI behavior instead of local screenshot commits:
 - Favor explicit logging and clear error messages.
 - Update README when setup/behavior/config changes.
 - Do not generate screenshots during normal agent coding/testing sessions.
+- **Keep CSP-compatible frontend code.** Do not add inline JavaScript in templates:
+  no `onclick`/`onchange`/`onsubmit`/etc. attributes and no inline `<script>` blocks.
+  Wire UI behavior in `static/js/app.js` via `addEventListener` instead.
+- **Keep style CSP strict.** Do not add inline styles (`style="..."`) or JS style writes
+  (`element.style...`) for UI behavior; prefer CSS classes toggled from JS.
+  Keep CSP free of `'unsafe-inline'` for both scripts and styles.
+- **When writing tests for CSP directives**, never use `urlparse` + the `in` operator on
+  URL-derived data — CodeQL flags it as `py/incomplete-url-substring-sanitization`.
+  Use exact `==` equality via `any()` instead:
+  ```python
+  # CORRECT
+  assert any(source == 'https://i.ytimg.com' for source in directives.get('img-src', []))
+  # WRONG (all flagged by CodeQL regardless of structure)
+  assert 'https://i.ytimg.com' in csp_string
+  assert 'i.ytimg.com' in img_src_hosts
+  ```
+  A CSP origin source like `https://i.ytimg.com` allows **all paths** under that origin,
+  so asserting the exact token is present is sufficient.
 - **Sessions must NOT survive container restarts.** `SECRET_KEY` is always generated
   fresh with `secrets.token_hex(32)` at startup and must never be read from an
   environment variable or made configurable. Do not add `SECRET_KEY` to `.env.example`,
