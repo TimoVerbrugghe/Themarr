@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tests.helpers import make_mock_show
-from app.youtube_utils import normalize_youtube_trim_window
+from app.youtube_utils import build_youtube_match_filter, normalize_youtube_trim_window
 
 
 class TestThemeYoutube:
@@ -98,6 +98,30 @@ class TestThemeYoutube:
             end_seconds=75,
         )
 
+    def test_download_youtube_theme_reports_match_filter_reason_when_no_mp3(self, monkeypatch, tmp_path):
+        from app.youtube_utils import download_youtube_theme_mp3
+        import yt_dlp
+
+        class _FakeYDL:
+            def __init__(self, opts):
+                self.opts = opts
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                pass
+            def download(self, *a, **kw):
+                return 0
+
+        monkeypatch.setattr('app.youtube_utils.yt_dlp.YoutubeDL', _FakeYDL)
+        monkeypatch.setattr('app.youtube_utils._youtube_retry_profiles', lambda: [('default', {})])
+        monkeypatch.setattr(
+            'app.youtube_utils._derive_download_skip_reason',
+            lambda *a, **kw: 'Video exceeds 900 seconds; provide a stop time to trim it',
+        )
+
+        with pytest.raises(yt_dlp.utils.DownloadError, match='Video exceeds 900 seconds; provide a stop time to trim it'):
+            download_youtube_theme_mp3('https://youtube.com/watch?v=test', str(tmp_path))
+
 
 class TestYoutubeTrimWindow:
     def test_normalize_youtube_trim_window_accepts_seconds_and_timestamps(self):
@@ -113,6 +137,26 @@ class TestYoutubeTrimWindow:
     def test_normalize_youtube_trim_window_rejects_invalid_format(self):
         with pytest.raises(ValueError, match='Start time must use seconds, MM:SS, or HH:MM:SS format'):
             normalize_youtube_trim_window('ten', None)
+
+
+class TestYoutubeMatchFilter:
+    def test_match_filter_rejects_long_video_without_stop_time(self):
+        match_filter = build_youtube_match_filter()
+        assert (
+            match_filter({'duration': 1200}, incomplete=False)
+            == 'Video exceeds 900 seconds; provide a stop time to trim it'
+        )
+
+    def test_match_filter_allows_long_video_with_short_trim_window(self):
+        match_filter = build_youtube_match_filter(start_seconds=0, end_seconds=25)
+        assert match_filter({'duration': 1200}, incomplete=False) is None
+
+    def test_match_filter_rejects_trim_window_beyond_max_limit(self):
+        match_filter = build_youtube_match_filter(start_seconds=0, end_seconds=901)
+        assert (
+            match_filter({'duration': 1200}, incomplete=False)
+            == 'Requested clip exceeds 900 seconds'
+        )
 
 
 class TestYoutubeSearch:
