@@ -223,9 +223,9 @@ def refresh_jellyfin_item_metadata(item_id):
             },
         )
         response.raise_for_status()
-        logger.info('Triggered Jellyfin metadata refresh for item %s', item_id)
+        logger.info('Triggered Jellyfin metadata refresh for item')
     except Exception as exc:
-        logger.warning('Failed to trigger Jellyfin metadata refresh for item %s: %s', item_id, exc)
+        logger.warning('Failed to trigger Jellyfin metadata refresh: %s', exc)
 
 
 def find_jellyfin_item_id_by_path(local_path):
