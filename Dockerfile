@@ -10,6 +10,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends gnupg ca-certif
     echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
         > /etc/apt/sources.list.d/nodesource.list && \
     apt-get update && apt-get install -y --no-install-recommends ffmpeg nodejs && \
+    rm -rf /usr/lib/node_modules/npm && \
+    rm -f /usr/bin/npm /usr/bin/npx /bin/npm /bin/npx && \
+    apt-get purge -y --auto-remove gnupg curl && \
+    rm -f /etc/apt/sources.list.d/nodesource.list /usr/share/keyrings/nodesource.gpg && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf /var/cache/apt/*
 
