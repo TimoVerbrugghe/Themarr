@@ -125,7 +125,7 @@ def _check_webhook_basic_auth():
     return jsonify({'error': 'Invalid webhook credentials'}), 401
 
 
-def _get_settings_env_values():
+def _get_settings_env_values(generated_api_key=None):
     """Return current raw environment values shown in the Settings page."""
     settings_vars = (
         'PLEX_URL',
@@ -150,4 +150,18 @@ def _get_settings_env_values():
         'PLEX_RETRY_ATTEMPTS',
         'PLEX_RETRY_DELAY',
     )
-    return {key: (os.getenv(key) or '') for key in settings_vars}
+    defaults_when_unset = {
+        'JELLYFIN_USER_ID': 'first user',
+        'API_KEY': generated_api_key or '',
+        'NOTIFY_ON_WEBHOOK_DOWNLOAD': 'true',
+        'NOTIFY_ON_WEBHOOK_FAILURE': 'true',
+        'NOTIFY_ON_UI_DOWNLOAD': 'true',
+    }
+    values = {}
+    for key in settings_vars:
+        raw_value = (os.getenv(key) or '').strip()
+        if not raw_value and key in defaults_when_unset:
+            values[key] = defaults_when_unset[key]
+        else:
+            values[key] = raw_value
+    return values

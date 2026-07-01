@@ -277,6 +277,9 @@
                 <tr class="settings-envtable-group"><td colspan="4">Notifications (optional)</td></tr>
                 <tr><td><code>PUSHOVER_APP_TOKEN</code></td><td class="settings-envtable-col-default">—</td><td class="settings-envtable-col-current" data-env-current="PUSHOVER_APP_TOKEN">Loading…</td><td>Pushover application token. Leave blank to disable push notifications.</td></tr>
                 <tr><td><code>PUSHOVER_USER_KEY</code></td><td class="settings-envtable-col-default">—</td><td class="settings-envtable-col-current" data-env-current="PUSHOVER_USER_KEY">Loading…</td><td>Pushover user/group key. Leave blank to disable push notifications.</td></tr>
+                <tr><td><code>NOTIFY_ON_WEBHOOK_DOWNLOAD</code></td><td class="settings-envtable-col-default"><code>true</code></td><td class="settings-envtable-col-current" data-env-current="NOTIFY_ON_WEBHOOK_DOWNLOAD">Loading…</td><td>Send Pushover notifications for successful webhook-triggered downloads.</td></tr>
+                <tr><td><code>NOTIFY_ON_WEBHOOK_FAILURE</code></td><td class="settings-envtable-col-default"><code>true</code></td><td class="settings-envtable-col-current" data-env-current="NOTIFY_ON_WEBHOOK_FAILURE">Loading…</td><td>Send Pushover notifications when webhook-triggered downloads fail.</td></tr>
+                <tr><td><code>NOTIFY_ON_UI_DOWNLOAD</code></td><td class="settings-envtable-col-default"><code>true</code></td><td class="settings-envtable-col-current" data-env-current="NOTIFY_ON_UI_DOWNLOAD">Loading…</td><td>Send Pushover notifications for downloads/uploads/copies started from the UI.</td></tr>
                 <tr class="settings-envtable-group"><td colspan="4">Webhooks (optional)</td></tr>
                 <tr><td><code>WEBHOOK_USERNAME</code></td><td class="settings-envtable-col-default">—</td><td class="settings-envtable-col-current" data-env-current="WEBHOOK_USERNAME">Loading…</td><td>Basic-auth username for the Plex webhook endpoint.</td></tr>
                 <tr><td><code>WEBHOOK_PASSWORD</code></td><td class="settings-envtable-col-default">—</td><td class="settings-envtable-col-current" data-env-current="WEBHOOK_PASSWORD">Loading…</td><td>Basic-auth password for the Plex webhook endpoint.</td></tr>
@@ -422,6 +425,22 @@
         <!-- Search results -->
         <div id="youtube-search-results" class="yt-search-results"></div>
 
+        <!-- Manual URL fallback -->
+        <div class="form-group">
+          <label for="youtube-url-input">Or paste a YouTube URL directly</label>
+          <input type="url" id="youtube-url-input" class="form-control" placeholder="https://www.youtube.com/watch?v=...">
+        </div>
+
+        <div class="form-group">
+          <label for="youtube-start-time-input">Start time (optional)</label>
+          <input type="text" id="youtube-start-time-input" class="form-control" placeholder="MM:SS or HH:MM:SS">
+        </div>
+
+        <div class="form-group">
+          <label for="youtube-stop-time-input">Stop time (optional)</label>
+          <input type="text" id="youtube-stop-time-input" class="form-control" placeholder="MM:SS or HH:MM:SS">
+        </div>
+
         <div id="modal-youtube-overwrite" class="overwrite-warning hidden">
           <div class="warning-box">
             <span>⚠️</span>
@@ -431,12 +450,6 @@
             <input type="checkbox" id="youtube-overwrite-check">
             Overwrite existing theme
           </label>
-        </div>
-
-        <!-- Manual URL fallback -->
-        <div class="form-group">
-          <label for="youtube-url-input">Or paste a YouTube URL directly</label>
-          <input type="url" id="youtube-url-input" class="form-control" placeholder="https://www.youtube.com/watch?v=...">
         </div>
 
         <div id="youtube-progress" class="progress-area hidden">
