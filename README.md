@@ -38,6 +38,18 @@ You can also upload custom MP3 files and copy existing local themes between item
 - **Dark/light UI + poster/list views**  
   Configurable defaults with in-browser preference switching.
 
+### Gallery
+
+| Scene | Dark | Light |
+|---|---|---|
+| Login screen | ![Login screen dark](screenshots/06_login_screen_dark.png) | ![Login screen light](screenshots/06_login_screen_light.png) |
+| Welcome screen | ![Welcome screen dark](screenshots/07_welcome_screen_dark.png) | ![Welcome screen light](screenshots/07_welcome_screen_light.png) |
+| Poster view | ![Poster view dark](screenshots/01_poster_view_dark.png) | ![Poster view light](screenshots/01_poster_view_light.png) |
+| List view | ![List view dark](screenshots/02_list_view_dark.png) | ![List view light](screenshots/02_list_view_light.png) |
+| YouTube downloader | ![YouTube downloader dark](screenshots/03_youtube_downloader_dark.png) | ![YouTube downloader light](screenshots/03_youtube_downloader_light.png) |
+| Copy theme | ![Copy theme dark](screenshots/04_copy_theme_dark.png) | ![Copy theme light](screenshots/04_copy_theme_light.png) |
+| Plex download | ![Plex download dark](screenshots/05_plex_download_dark.png) | ![Plex download light](screenshots/05_plex_download_light.png) |
+
 ## Quick start (Docker Compose)
 
 Themarr is designed to run with the `docker-compose.yml` in this repository.
@@ -70,10 +82,10 @@ Edit the `volumes` section of `docker-compose.yml` to match your actual library 
 
 ```yaml
 volumes:
-  # Use the SAME path on both sides (host:container) so that the absolute path
+  # Use the SAME path you use to mount your media in the plex/jellyfin container so that the absolute path
   # inside Themarr matches the path reported by your Plex/Jellyfin container.
-  - /media/tvshows:/media/tvshows
-  - /media/movies:/media/movies
+  - /<path to tvshows>:/tvshows
+  - /<path to movies>:/movies
 ```
 
 If your Plex or Jellyfin container mounts `/data/media/tv`, use `/data/media/tv:/data/media/tv` here.
@@ -138,8 +150,6 @@ DISABLE_AUTH=true
 ```
 
 > **Note:** `API_KEY` is still used for programmatic API access (webhooks, API clients) regardless of the UI auth mode.
-
-
 
 ## Source behavior by provider
 
