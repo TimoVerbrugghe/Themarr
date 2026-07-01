@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Prevents brute-force attacks on the /api/auth/login endpoint.
 # ---------------------------------------------------------------------------
 _login_attempt_lock = threading.Lock()
-_login_attempts: dict = {}  # {remote_addr: [float, ...]} — list of attempt timestamps
+_login_attempts: dict[str, list[float]] = {}  # {remote_addr: [timestamp, ...]}
 _LOGIN_RATE_LIMIT_WINDOW = 300  # 5-minute sliding window
 _LOGIN_RATE_LIMIT_MAX = 20      # max login attempts within the window
 
@@ -31,11 +31,16 @@ def _is_login_rate_limited(remote_addr: str) -> bool:
     """
     if current_app.config.get('TESTING'):
         return False
+    if not remote_addr:
+        logger.warning('Login attempt received with no remote address; skipping rate-limit check')
+        return False
     now = time.time()
     window_start = now - _LOGIN_RATE_LIMIT_WINDOW
     with _login_attempt_lock:
         prior = [t for t in _login_attempts.get(remote_addr, []) if t > window_start]
         if len(prior) >= _LOGIN_RATE_LIMIT_MAX:
+            # Do NOT record this attempt — the window must be allowed to expire
+            # once the client stops sending requests.
             _login_attempts[remote_addr] = prior
             return True
         prior.append(now)

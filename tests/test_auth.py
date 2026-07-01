@@ -1,9 +1,16 @@
 """Tests for app/auth.py — authentication, sessions, API key, and init endpoint."""
 import os
+import time
 from unittest.mock import patch
 
 import pytest
 
+from app.auth import (
+    _is_login_rate_limited,
+    _login_attempts,
+    _login_attempt_lock,
+    _LOGIN_RATE_LIMIT_MAX,
+)
 from tests.helpers import make_mock_show
 
 
@@ -323,21 +330,16 @@ class TestLoginRateLimit:
 
     def _fill_rate_limit(self, remote_addr):
         """Pre-fill the rate-limit counter so the next request is blocked."""
-        import time
-        from app.auth import _login_attempts, _login_attempt_lock, _LOGIN_RATE_LIMIT_MAX
         now = time.time()
         with _login_attempt_lock:
             _login_attempts[remote_addr] = [now] * _LOGIN_RATE_LIMIT_MAX
 
     def _clear_rate_limit(self, remote_addr):
-        from app.auth import _login_attempts, _login_attempt_lock
         with _login_attempt_lock:
             _login_attempts.pop(remote_addr, None)
 
     def test_rate_limit_disabled_in_testing_mode(self, app):
         """_is_login_rate_limited returns False when TESTING=True (normal test mode)."""
-        from app.auth import _is_login_rate_limited, _LOGIN_RATE_LIMIT_MAX
-        import time
         remote_addr = '_test_rl_testing_mode'
         self._fill_rate_limit(remote_addr)
         try:
@@ -351,7 +353,6 @@ class TestLoginRateLimit:
 
     def test_rate_limit_allows_initial_attempts(self, app):
         """_is_login_rate_limited returns False for the first attempt."""
-        from app.auth import _is_login_rate_limited
         remote_addr = '_test_rl_allow_initial'
         self._clear_rate_limit(remote_addr)
         try:
@@ -365,7 +366,6 @@ class TestLoginRateLimit:
 
     def test_rate_limit_blocks_after_max_attempts(self, app):
         """_is_login_rate_limited returns True once the threshold is reached."""
-        from app.auth import _is_login_rate_limited
         remote_addr = '_test_rl_block'
         self._fill_rate_limit(remote_addr)
         try:
