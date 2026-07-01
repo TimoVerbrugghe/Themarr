@@ -51,7 +51,7 @@ from app.auth import (
     _log_generated_api_key_warning, _auth_disabled, _get_ui_credentials,
     _credentials_auth_configured, _ui_auth_misconfigured, _ui_auth_warning_message,
     _get_auth_mode, _parse_api_key, _get_api_key, _check_api_request_auth,
-    _check_webhook_basic_auth, _get_settings_env_values,
+    _check_webhook_basic_auth, _get_settings_env_values, _is_login_rate_limited,
 )
 from app.cache import (
     init_cache, get_jellyfin_user_id_cached, set_jellyfin_user_id_cached,
@@ -349,6 +349,10 @@ def auth_login():
         session['authenticated'] = True
         return jsonify({'ok': True, 'auth_mode': 'disabled'})
 
+    # Rate-limit non-disabled login attempts to prevent brute-force attacks.
+    if _is_login_rate_limited(request.remote_addr or ''):
+        return jsonify({'error': 'Too many login attempts. Please try again later.'}), 429
+
     if auth_mode == 'credentials':
         provided_username = (data.get('username') or '').strip()
         provided_password = (data.get('password') or '').strip()
@@ -423,6 +427,10 @@ def add_security_headers(response):
     response.headers.setdefault('X-Frame-Options', 'DENY')
     response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
     response.headers.setdefault('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
+    # HSTS: instruct browsers to use HTTPS exclusively for 1 year (ignored over plain HTTP).
+    response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    # COOP: prevents cross-origin documents from retaining a reference to this window.
+    response.headers.setdefault('Cross-Origin-Opener-Policy', 'same-origin')
     response.headers.setdefault(
         'Content-Security-Policy',
         "default-src 'self'; "
@@ -1025,8 +1033,13 @@ def preview_themerrdb_theme(rating_key):
         if not is_valid_audio_stream_url(audio_url):
             logger.warning('yt-dlp returned an unexpected stream host for item %s', rating_key)
             return jsonify({'error': 'Resolved audio stream URL is not from an allowed host'}), 502
-        response = http_requests.get(audio_url, stream=True, timeout=30)
-        response.raise_for_status()
+        # allow_redirects=False: the hostname check above only validates the
+        # initial URL; following a redirect to an internal service would bypass
+        # the SSRF guard.  CDN stream URLs from yt-dlp must not redirect.
+        response = http_requests.get(audio_url, stream=True, timeout=30, allow_redirects=False)
+        if response.status_code != 200:
+            response.close()
+            return jsonify({'error': 'Audio stream not available'}), 502
         return Response(
             _stream_http_response_chunks(response),
             mimetype='audio/mpeg',
@@ -1213,8 +1226,13 @@ def preview_provider_themerrdb_theme(provider, item_id):
         if not is_valid_audio_stream_url(audio_url):
             logger.warning('yt-dlp returned an unexpected stream host for %s item %s', provider, item_id)
             return jsonify({'error': 'Resolved audio stream URL is not from an allowed host'}), 502
-        response = http_requests.get(audio_url, stream=True, timeout=30)
-        response.raise_for_status()
+        # allow_redirects=False: the hostname check above only validates the
+        # initial URL; following a redirect to an internal service would bypass
+        # the SSRF guard.  CDN stream URLs from yt-dlp must not redirect.
+        response = http_requests.get(audio_url, stream=True, timeout=30, allow_redirects=False)
+        if response.status_code != 200:
+            response.close()
+            return jsonify({'error': 'Audio stream not available'}), 502
         return Response(
             _stream_http_response_chunks(response),
             mimetype='audio/mpeg',

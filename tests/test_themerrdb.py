@@ -82,6 +82,7 @@ class TestThemerrDB:
              patch('app.web_app.http_requests') as mock_requests:
 
             mock_resp = MagicMock()
+            mock_resp.status_code = 200
             mock_resp.iter_content.return_value = [b'audio_chunk']
             mock_requests.get.return_value = mock_resp
 
@@ -173,6 +174,7 @@ class TestThemerrDB:
              patch('app.web_app.extract_youtube_audio_url', return_value='https://rr1---sn-test.googlevideo.com/stream'), \
              patch('app.web_app.http_requests') as mock_requests:
             mock_resp = MagicMock()
+            mock_resp.status_code = 200
             mock_resp.iter_content.return_value = [b'audio_chunk']
             mock_requests.get.return_value = mock_resp
 

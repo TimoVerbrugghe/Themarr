@@ -763,3 +763,96 @@ class TestSecurityHeaders:
         assert resp.headers.get('X-Frame-Options') == 'DENY'
         csp = resp.headers.get('Content-Security-Policy', '')
         assert "'unsafe-inline'" not in csp
+
+    def test_hsts_header_present(self, app):
+        """Strict-Transport-Security header must be present on all API responses."""
+        with patch.dict(os.environ, {'DISABLE_AUTH': 'true'}):
+            with app.test_client() as c:
+                resp = c.get('/api/init')
+        hsts = resp.headers.get('Strict-Transport-Security', '')
+        assert 'max-age=31536000' in hsts
+        assert 'includeSubDomains' in hsts
+
+    def test_coop_header_present(self, app):
+        """Cross-Origin-Opener-Policy header must be same-origin on all responses."""
+        with patch.dict(os.environ, {'DISABLE_AUTH': 'true'}):
+            with app.test_client() as c:
+                resp = c.get('/api/init')
+        assert resp.headers.get('Cross-Origin-Opener-Policy') == 'same-origin'
+
+
+class TestAudioStreamSsrf:
+    """SECURITY — Audio preview endpoints must reject HTTP redirects to prevent SSRF."""
+
+    def test_plex_preview_returns_502_on_redirect(self, app):
+        """preview_themerrdb_theme returns 502 when the stream URL redirects (3xx)."""
+        redirect_response = MagicMock()
+        redirect_response.status_code = 302
+
+        mock_item = MagicMock()
+        mock_item.ratingKey = 123
+
+        themerrdb_data = {'youtube_theme_url': 'https://www.youtube.com/watch?v=abc123'}
+
+        with patch.dict(os.environ, {'DISABLE_AUTH': 'true', 'PLEX_URL': 'http://plex', 'PLEX_TOKEN': 'tok'}):
+            with patch('app.web_app.get_plex') as mock_get_plex, \
+                 patch('app.web_app.get_themerrdb_theme', return_value=themerrdb_data), \
+                 patch('app.web_app.is_valid_youtube_url', return_value=True), \
+                 patch('app.web_app.extract_youtube_audio_url', return_value='https://googlevideo.com/stream'), \
+                 patch('app.web_app.is_valid_audio_stream_url', return_value=True), \
+                 patch('app.web_app.http_requests') as mock_http:
+                mock_get_plex.return_value.fetchItem.return_value = mock_item
+                mock_http.get.return_value = redirect_response
+                with app.test_client() as c:
+                    resp = c.get('/api/items/123/theme/themerrdb/preview')
+
+        assert resp.status_code == 502
+        redirect_response.close.assert_called_once()
+
+    def test_provider_preview_returns_502_on_redirect(self, app):
+        """preview_provider_themerrdb_theme returns 502 when the stream URL redirects (3xx)."""
+        redirect_response = MagicMock()
+        redirect_response.status_code = 301
+
+        themerrdb_data = {'youtube_theme_url': 'https://www.youtube.com/watch?v=xyz789'}
+
+        with patch.dict(os.environ, {'DISABLE_AUTH': 'true'}):
+            with patch('app.web_app._get_item_context', return_value={'provider': 'jellyfin', 'id': '12345'}), \
+                 patch('app.web_app.get_themerrdb_data_for_context', return_value=themerrdb_data), \
+                 patch('app.web_app.is_valid_youtube_url', return_value=True), \
+                 patch('app.web_app.extract_youtube_audio_url', return_value='https://googlevideo.com/stream'), \
+                 patch('app.web_app.is_valid_audio_stream_url', return_value=True), \
+                 patch('app.web_app.http_requests') as mock_http:
+                mock_http.get.return_value = redirect_response
+                with app.test_client() as c:
+                    resp = c.get('/api/items/jellyfin/tmdb/12345/theme/themerrdb/preview')
+
+        assert resp.status_code == 502
+        redirect_response.close.assert_called_once()
+
+    def test_plex_preview_streams_on_200(self, app):
+        """preview_themerrdb_theme streams audio when stream URL returns 200."""
+        ok_response = MagicMock()
+        ok_response.status_code = 200
+        ok_response.iter_content.return_value = iter([b'audio-data'])
+
+        mock_item = MagicMock()
+        mock_item.ratingKey = 456
+
+        themerrdb_data = {'youtube_theme_url': 'https://www.youtube.com/watch?v=abc456'}
+
+        with patch.dict(os.environ, {'DISABLE_AUTH': 'true', 'PLEX_URL': 'http://plex', 'PLEX_TOKEN': 'tok'}):
+            with patch('app.web_app.get_plex') as mock_get_plex, \
+                 patch('app.web_app.get_themerrdb_theme', return_value=themerrdb_data), \
+                 patch('app.web_app.is_valid_youtube_url', return_value=True), \
+                 patch('app.web_app.extract_youtube_audio_url', return_value='https://googlevideo.com/stream'), \
+                 patch('app.web_app.is_valid_audio_stream_url', return_value=True), \
+                 patch('app.web_app.http_requests') as mock_http:
+                mock_get_plex.return_value.fetchItem.return_value = mock_item
+                mock_http.get.return_value = ok_response
+                with app.test_client() as c:
+                    resp = c.get('/api/items/456/theme/themerrdb/preview')
+
+        # 200 response streams audio — not a 502
+        assert resp.status_code == 200
+

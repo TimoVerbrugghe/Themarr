@@ -316,3 +316,103 @@ class TestGetEndpointsRequireAuth:
             with app.test_client() as c:
                 resp = c.get('/api/init')
         assert resp.status_code == 200
+
+
+class TestLoginRateLimit:
+    """SECURITY — /api/auth/login must enforce a per-IP rate limit to prevent brute-force attacks."""
+
+    def _fill_rate_limit(self, remote_addr):
+        """Pre-fill the rate-limit counter so the next request is blocked."""
+        import time
+        from app.auth import _login_attempts, _login_attempt_lock, _LOGIN_RATE_LIMIT_MAX
+        now = time.time()
+        with _login_attempt_lock:
+            _login_attempts[remote_addr] = [now] * _LOGIN_RATE_LIMIT_MAX
+
+    def _clear_rate_limit(self, remote_addr):
+        from app.auth import _login_attempts, _login_attempt_lock
+        with _login_attempt_lock:
+            _login_attempts.pop(remote_addr, None)
+
+    def test_rate_limit_disabled_in_testing_mode(self, app):
+        """_is_login_rate_limited returns False when TESTING=True (normal test mode)."""
+        from app.auth import _is_login_rate_limited, _LOGIN_RATE_LIMIT_MAX
+        import time
+        remote_addr = '_test_rl_testing_mode'
+        self._fill_rate_limit(remote_addr)
+        try:
+            with app.app_context():
+                # TESTING=True is set by the fixture — rate limiter must be off.
+                assert app.config.get('TESTING') is True
+                result = _is_login_rate_limited(remote_addr)
+            assert result is False
+        finally:
+            self._clear_rate_limit(remote_addr)
+
+    def test_rate_limit_allows_initial_attempts(self, app):
+        """_is_login_rate_limited returns False for the first attempt."""
+        from app.auth import _is_login_rate_limited
+        remote_addr = '_test_rl_allow_initial'
+        self._clear_rate_limit(remote_addr)
+        try:
+            app.config['TESTING'] = False
+            with app.app_context():
+                result = _is_login_rate_limited(remote_addr)
+            assert result is False
+        finally:
+            app.config['TESTING'] = True
+            self._clear_rate_limit(remote_addr)
+
+    def test_rate_limit_blocks_after_max_attempts(self, app):
+        """_is_login_rate_limited returns True once the threshold is reached."""
+        from app.auth import _is_login_rate_limited
+        remote_addr = '_test_rl_block'
+        self._fill_rate_limit(remote_addr)
+        try:
+            app.config['TESTING'] = False
+            with app.app_context():
+                result = _is_login_rate_limited(remote_addr)
+            assert result is True
+        finally:
+            app.config['TESTING'] = True
+            self._clear_rate_limit(remote_addr)
+
+    def test_login_endpoint_returns_429_when_rate_limited(self, app):
+        """POST /api/auth/login returns 429 when the caller is rate-limited."""
+        remote_addr = '192.0.2.1'
+        self._fill_rate_limit(remote_addr)
+        try:
+            app.config['TESTING'] = False
+            with patch.dict(os.environ, {'AUTH_USERNAME': 'admin', 'AUTH_PASSWORD': 'secret', 'DISABLE_AUTH': ''}):
+                with app.test_client() as c:
+                    resp = c.post(
+                        '/api/auth/login',
+                        json={'username': 'admin', 'password': 'secret'},
+                        environ_base={'REMOTE_ADDR': remote_addr},
+                    )
+            assert resp.status_code == 429
+            data = resp.get_json()
+            assert 'Too many' in data['error']
+        finally:
+            app.config['TESTING'] = True
+            self._clear_rate_limit(remote_addr)
+
+    def test_disable_auth_mode_bypasses_rate_limit(self, app):
+        """DISABLE_AUTH=true login is never rate-limited (no credentials to brute-force)."""
+        remote_addr = '192.0.2.2'
+        self._fill_rate_limit(remote_addr)
+        try:
+            app.config['TESTING'] = False
+            with patch.dict(os.environ, {'DISABLE_AUTH': 'true', 'AUTH_USERNAME': '', 'AUTH_PASSWORD': ''}):
+                with app.test_client() as c:
+                    resp = c.post(
+                        '/api/auth/login',
+                        json={},
+                        environ_base={'REMOTE_ADDR': remote_addr},
+                    )
+            # DISABLE_AUTH short-circuits before the rate-limit check.
+            assert resp.status_code == 200
+        finally:
+            app.config['TESTING'] = True
+            self._clear_rate_limit(remote_addr)
+

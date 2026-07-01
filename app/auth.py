@@ -3,9 +3,44 @@
 import logging
 import os
 import hmac
-from flask import request, session, jsonify
+import threading
+import time
+from flask import current_app, request, session, jsonify
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Login rate limiter — simple in-memory sliding-window counter.
+# Prevents brute-force attacks on the /api/auth/login endpoint.
+# ---------------------------------------------------------------------------
+_login_attempt_lock = threading.Lock()
+_login_attempts: dict = {}  # {remote_addr: [float, ...]} — list of attempt timestamps
+_LOGIN_RATE_LIMIT_WINDOW = 300  # 5-minute sliding window
+_LOGIN_RATE_LIMIT_MAX = 20      # max login attempts within the window
+
+
+def _is_login_rate_limited(remote_addr: str) -> bool:
+    """Return True when *remote_addr* has exceeded the login attempt rate limit.
+
+    Uses a sliding-window in-memory counter keyed on the client IP address.
+    Old timestamps outside the window are discarded on each call so memory
+    usage stays bounded.
+
+    Automatically disabled when Flask TESTING mode is active so the unit
+    test suite is not affected.
+    """
+    if current_app.config.get('TESTING'):
+        return False
+    now = time.time()
+    window_start = now - _LOGIN_RATE_LIMIT_WINDOW
+    with _login_attempt_lock:
+        prior = [t for t in _login_attempts.get(remote_addr, []) if t > window_start]
+        if len(prior) >= _LOGIN_RATE_LIMIT_MAX:
+            _login_attempts[remote_addr] = prior
+            return True
+        prior.append(now)
+        _login_attempts[remote_addr] = prior
+        return False
 
 
 def _log_generated_api_key_warning():
