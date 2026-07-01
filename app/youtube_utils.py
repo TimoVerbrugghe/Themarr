@@ -31,12 +31,40 @@ def is_valid_youtube_url(url):
     return hostname in ALLOWED_YOUTUBE_HOSTS
 
 
+def build_youtube_match_filter(start_seconds=None, end_seconds=None):
+    """Build a yt-dlp match filter that honors optional trim settings."""
+    def youtube_match_filter(info_dict, *, incomplete):
+        duration = info_dict.get('duration')
+        if not duration:
+            return None
+
+        total_duration = int(duration)
+        effective_start = start_seconds or 0
+        if effective_start >= total_duration:
+            return 'Start time exceeds video duration'
+
+        if end_seconds is not None:
+            if end_seconds > total_duration:
+                return 'Stop time exceeds video duration'
+            clip_duration = end_seconds - effective_start
+            if clip_duration > MAX_YOUTUBE_DURATION_SECONDS:
+                return f'Requested clip exceeds {MAX_YOUTUBE_DURATION_SECONDS} seconds'
+            return None
+
+        effective_duration = total_duration - effective_start
+        if effective_duration > MAX_YOUTUBE_DURATION_SECONDS:
+            return (
+                f'Video exceeds {MAX_YOUTUBE_DURATION_SECONDS} seconds; '
+                'provide a stop time to trim it'
+            )
+        return None
+
+    return youtube_match_filter
+
+
 def youtube_match_filter(info_dict, *, incomplete):
-    """Reject overly long videos before downloading."""
-    duration = info_dict.get('duration')
-    if duration and duration > MAX_YOUTUBE_DURATION_SECONDS:
-        return f'Video exceeds {MAX_YOUTUBE_DURATION_SECONDS} seconds'
-    return None
+    """Backward-compatible default match filter used by search routes."""
+    return build_youtube_match_filter()(info_dict, incomplete=incomplete)
 
 
 def _youtube_retry_profiles():
@@ -69,7 +97,7 @@ def _youtube_preview_ydl_opts(profile_overrides=None):
     return opts
 
 
-def _youtube_download_ydl_opts(tmpdir, profile_overrides=None):
+def _youtube_download_ydl_opts(tmpdir, profile_overrides=None, start_seconds=None, end_seconds=None):
     """Build yt-dlp options for downloading and converting a theme MP3."""
     opts = {
         'format': 'bestaudio/best',
@@ -82,7 +110,10 @@ def _youtube_download_ydl_opts(tmpdir, profile_overrides=None):
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
-        'match_filter': youtube_match_filter,
+        'match_filter': build_youtube_match_filter(
+            start_seconds=start_seconds,
+            end_seconds=end_seconds,
+        ),
         'max_filesize': MAX_UPLOAD_BYTES,
     }
     if profile_overrides:
@@ -149,6 +180,20 @@ def _clean_yt_dlp_error(exc):
     return str(exc).removeprefix('ERROR: ').strip()
 
 
+def _derive_download_skip_reason(youtube_url, profile_overrides, start_seconds=None, end_seconds=None):
+    """Best-effort explanation when yt-dlp finishes without producing an MP3."""
+    try:
+        with yt_dlp.YoutubeDL(_youtube_preview_ydl_opts(profile_overrides)) as ydl:
+            info = ydl.extract_info(youtube_url, download=False)
+        reason = build_youtube_match_filter(
+            start_seconds=start_seconds,
+            end_seconds=end_seconds,
+        )(info or {}, incomplete=False)
+        return reason
+    except yt_dlp.utils.DownloadError:
+        return None
+
+
 def _stream_http_response_chunks(response, *, chunk_size=8192):
     """Yield streamed HTTP response chunks while handling client disconnects."""
     try:
@@ -204,7 +249,12 @@ def download_youtube_theme_mp3(youtube_url, tmpdir, start_seconds=None, end_seco
     errors = []
     for profile_name, overrides in _youtube_retry_profiles():
         try:
-            ydl_opts = _youtube_download_ydl_opts(tmpdir, overrides)
+            ydl_opts = _youtube_download_ydl_opts(
+                tmpdir,
+                overrides,
+                start_seconds=start_seconds,
+                end_seconds=end_seconds,
+            )
             if start_seconds is not None or end_seconds is not None:
                 postprocessor_args = []
                 if start_seconds is not None:
@@ -217,7 +267,16 @@ def download_youtube_theme_mp3(youtube_url, tmpdir, start_seconds=None, end_seco
             mp3_files = list(Path(tmpdir).glob('*.mp3'))
             if mp3_files:
                 return mp3_files[0]
-            errors.append(f'{profile_name}: Download failed: no MP3 file produced')
+            skip_reason = _derive_download_skip_reason(
+                youtube_url,
+                overrides,
+                start_seconds=start_seconds,
+                end_seconds=end_seconds,
+            )
+            if skip_reason:
+                errors.append(f'{profile_name}: {skip_reason}')
+            else:
+                errors.append(f'{profile_name}: Download failed: no MP3 file produced')
         except yt_dlp.utils.DownloadError as exc:
             errors.append(f'{profile_name}: {_clean_yt_dlp_error(exc)}')
     raise yt_dlp.utils.DownloadError(' | '.join(errors))
