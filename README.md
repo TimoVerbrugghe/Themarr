@@ -22,6 +22,7 @@ You can also upload custom MP3 files and copy existing local themes between item
 
 - **Three download sources**  
   Download from **Plex** (Plex items), **ThemerrDB** (Plex + Jellyfin), or **YouTube**.
+  YouTube downloads support optional start/stop trim times in the modal.
 
 - **Upload and copy local themes**  
   Upload custom MP3 files or copy `theme.mp3` between items/libraries.

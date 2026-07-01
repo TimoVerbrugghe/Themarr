@@ -382,6 +382,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.querySelectorAll('input[name="filter-theme"]').forEach((radio) => {
     radio.addEventListener('change', applyFilters);
   });
+  const plexFilterCheck = document.getElementById('filter-plex-avail');
+  if (plexFilterCheck) plexFilterCheck.addEventListener('change', applyFilters);
+  const themerrdbFilterCheck = document.getElementById('filter-themerrdb-avail');
+  if (themerrdbFilterCheck) themerrdbFilterCheck.addEventListener('change', applyFilters);
   document.querySelectorAll('[data-modal-close]').forEach((btn) => {
     btn.addEventListener('click', () => closeModal(btn.dataset.modalClose));
   });
@@ -1760,6 +1764,8 @@ function openYoutubeModal(item) {
   activeItemContext = { provider: item.provider || 'plex', id: String(item.id || item.ratingKey) };
   document.getElementById('youtube-item-title').textContent = item.title;
   document.getElementById('youtube-url-input').value = '';
+  document.getElementById('youtube-start-time-input').value = '';
+  document.getElementById('youtube-stop-time-input').value = '';
   document.getElementById('youtube-progress').classList.add('hidden');
   document.getElementById('youtube-search-results').innerHTML = '';
   _stopYoutubePlayer();
@@ -1923,6 +1929,8 @@ async function confirmYoutube() {
     showToast('error', 'Please select a result or enter a YouTube URL');
     return;
   }
+  const startTime = document.getElementById('youtube-start-time-input').value.trim();
+  const stopTime = document.getElementById('youtube-stop-time-input').value.trim();
   const overwrite = document.getElementById('youtube-overwrite-check').checked;
   const progressEl = document.getElementById('youtube-progress');
   progressEl.classList.remove('hidden');
@@ -1930,7 +1938,12 @@ async function confirmYoutube() {
   try {
     const data = await apiPost(
       `/api/items/${activeItemContext.provider}/${encodeURIComponent(activeItemContext.id)}/theme/youtube`,
-      { url, overwrite },
+      {
+        url,
+        overwrite,
+        start_time: startTime || null,
+        end_time: stopTime || null,
+      },
     );
     progressEl.classList.add('hidden');
     if (data.error && data.exists) {

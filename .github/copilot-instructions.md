@@ -98,6 +98,11 @@ When changing configuration, always update:
 - `Dockerfile`
 - `README.md`
 
+When adding a new environment variable that appears in the Settings "Environment Variables" table:
+
+- Include it in the backend `env_values` payload.
+- Ensure the Settings "Current" column reports the **effective runtime value** when unset (fallback to the documented default), not `—`.
+
 ## Web UI screenshots — skill managed
 
 Screenshots are refreshed on demand by running the repository skill:

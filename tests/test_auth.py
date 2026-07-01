@@ -81,7 +81,18 @@ class TestSettingsRuntime:
         assert data['api_key_generated'] is False
 
     def test_runtime_settings_includes_current_environment_values(self, app):
-        with patch.dict(os.environ, {'API_KEY': 'configured-key', 'DEFAULT_THEME': 'light', 'DISABLE_AUTH': 'false'}, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                'API_KEY': 'configured-key',
+                'DEFAULT_THEME': 'light',
+                'DISABLE_AUTH': 'false',
+                'NOTIFY_ON_WEBHOOK_DOWNLOAD': 'false',
+                'NOTIFY_ON_WEBHOOK_FAILURE': 'true',
+                'NOTIFY_ON_UI_DOWNLOAD': 'false',
+            },
+            clear=False,
+        ):
             with app.test_client() as c:
                 resp = c.get('/api/settings/runtime', headers={'X-Themarr-Api-Key': 'configured-key'})
 
@@ -90,6 +101,9 @@ class TestSettingsRuntime:
         env_values = data['env_values']
         assert env_values['DEFAULT_THEME'] == 'light'
         assert env_values['DISABLE_AUTH'] == 'false'
+        assert env_values['NOTIFY_ON_WEBHOOK_DOWNLOAD'] == 'false'
+        assert env_values['NOTIFY_ON_WEBHOOK_FAILURE'] == 'true'
+        assert env_values['NOTIFY_ON_UI_DOWNLOAD'] == 'false'
 
     def test_runtime_settings_accessible_via_session(self, app):
         with patch.dict(os.environ, {'API_KEY': 'sess-key', 'AUTH_USERNAME': 'admin', 'AUTH_PASSWORD': 'secret'}):
@@ -103,6 +117,45 @@ class TestSettingsRuntime:
                 resp = session_client.get('/api/settings/runtime')
         assert resp.status_code == 200
         assert resp.get_json()['api_key'] == 'sess-key'
+
+    def test_runtime_settings_notification_env_defaults_when_unset(self, app):
+        with patch.dict(
+            os.environ,
+            {
+                'API_KEY': 'configured-key',
+                'NOTIFY_ON_WEBHOOK_DOWNLOAD': '',
+                'NOTIFY_ON_WEBHOOK_FAILURE': '',
+                'NOTIFY_ON_UI_DOWNLOAD': '',
+            },
+            clear=False,
+        ):
+            with app.test_client() as c:
+                resp = c.get('/api/settings/runtime', headers={'X-Themarr-Api-Key': 'configured-key'})
+
+        assert resp.status_code == 200
+        env_values = resp.get_json()['env_values']
+        assert env_values['NOTIFY_ON_WEBHOOK_DOWNLOAD'] == 'true'
+        assert env_values['NOTIFY_ON_WEBHOOK_FAILURE'] == 'true'
+        assert env_values['NOTIFY_ON_UI_DOWNLOAD'] == 'true'
+
+    def test_runtime_settings_jellyfin_user_id_default_when_unset(self, app):
+        with patch.dict(os.environ, {'API_KEY': 'configured-key', 'JELLYFIN_USER_ID': ''}, clear=False):
+            with app.test_client() as c:
+                resp = c.get('/api/settings/runtime', headers={'X-Themarr-Api-Key': 'configured-key'})
+
+        assert resp.status_code == 200
+        env_values = resp.get_json()['env_values']
+        assert env_values['JELLYFIN_USER_ID'] == 'first user'
+
+    def test_runtime_settings_api_key_current_uses_generated_value_when_unset(self, client):
+        with patch.dict(os.environ, {'API_KEY': ''}, clear=False):
+            resp = client.get('/api/settings/runtime')
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        env_values = data['env_values']
+        assert data['api_key_generated'] is True
+        assert env_values['API_KEY'] == data['api_key']
 
 
 class TestApiAuth:

@@ -2,7 +2,10 @@
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from tests.helpers import make_mock_show
+from app.youtube_utils import normalize_youtube_trim_window
 
 
 class TestThemeYoutube:
@@ -48,6 +51,68 @@ class TestThemeYoutube:
             resp = client.post('/api/items/1/theme/youtube',
                                json={'url': 'https://youtube.com/watch?v=test', 'overwrite': False})
         assert resp.status_code == 200
+
+    def test_youtube_rejects_invalid_trim_window(self, client, mock_plex):
+        resp = client.post(
+            '/api/items/1/theme/youtube',
+            json={
+                'url': 'https://youtube.com/watch?v=test',
+                'overwrite': False,
+                'start_time': '01:30',
+                'end_time': '00:30',
+            },
+        )
+        assert resp.status_code == 400
+        assert resp.get_json()['error'] == 'Stop time must be greater than start time'
+
+    def test_youtube_download_passes_trim_window(self, client, mock_plex, tmp_path):
+        show_dir = tmp_path / 'Test Show (2020)'
+        show_dir.mkdir()
+        show = make_mock_show(location=str(show_dir))
+        mock_plex.fetchItem.return_value = show
+
+        fake_tmpdir = tmp_path / 'ytdl_tmp'
+        fake_tmpdir.mkdir()
+        fake_mp3 = fake_tmpdir / 'theme.mp3'
+        fake_mp3.write_bytes(b'youtube_audio')
+
+        with patch('app.web_app.download_youtube_theme_mp3', return_value=fake_mp3) as mock_download, \
+             patch('tempfile.TemporaryDirectory') as mock_tmpdir:
+            mock_tmpdir.return_value.__enter__ = lambda s: str(fake_tmpdir)
+            mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+            resp = client.post(
+                '/api/items/1/theme/youtube',
+                json={
+                    'url': 'https://youtube.com/watch?v=test',
+                    'overwrite': False,
+                    'start_time': '00:10',
+                    'end_time': '01:15',
+                },
+            )
+
+        assert resp.status_code == 200
+        mock_download.assert_called_once_with(
+            'https://youtube.com/watch?v=test',
+            str(fake_tmpdir),
+            start_seconds=10,
+            end_seconds=75,
+        )
+
+
+class TestYoutubeTrimWindow:
+    def test_normalize_youtube_trim_window_accepts_seconds_and_timestamps(self):
+        start_seconds, end_seconds = normalize_youtube_trim_window('00:30', '1:10')
+        assert start_seconds == 30
+        assert end_seconds == 70
+
+    def test_normalize_youtube_trim_window_allows_blank_values(self):
+        start_seconds, end_seconds = normalize_youtube_trim_window('', None)
+        assert start_seconds is None
+        assert end_seconds is None
+
+    def test_normalize_youtube_trim_window_rejects_invalid_format(self):
+        with pytest.raises(ValueError, match='Start time must use seconds, MM:SS, or HH:MM:SS format'):
+            normalize_youtube_trim_window('ten', None)
 
 
 class TestYoutubeSearch:

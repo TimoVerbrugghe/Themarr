@@ -33,6 +33,7 @@ from app.youtube_utils import (
     _youtube_preview_ydl_opts, _youtube_download_ydl_opts,
     _clean_yt_dlp_error, _stream_http_response_chunks,
     extract_youtube_audio_url, is_valid_audio_stream_url, download_youtube_theme_mp3,
+    normalize_youtube_trim_window,
 )
 from app.plex_utils import (
     get_plex, plex_is_configured, plex_session_get, get_section_base_paths,
@@ -411,7 +412,7 @@ def get_settings_runtime():
         'library_page_size': LIBRARY_PAGE_SIZE,
         'library_page_size_max': LIBRARY_PAGE_SIZE_MAX_VALUE,
         'poster_cache_max_items': POSTER_CACHE_MAX_ITEMS,
-        'env_values': _get_settings_env_values(),
+        'env_values': _get_settings_env_values(actual_key if is_generated else None),
     })
 
 
@@ -941,6 +942,13 @@ def download_from_youtube(rating_key):
             return jsonify({'error': 'Only YouTube URLs are supported'}), 400
 
         overwrite = data.get('overwrite', False)
+        try:
+            start_seconds, end_seconds = normalize_youtube_trim_window(
+                data.get('start_time'),
+                data.get('end_time'),
+            )
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
 
         plex = get_plex()
         item = plex.fetchItem(rating_key)
@@ -955,7 +963,12 @@ def download_from_youtube(rating_key):
             return jsonify({'error': 'Theme already exists', 'exists': True}), 409
 
         with tempfile.TemporaryDirectory(dir=YTDLP_WORKDIR) as tmpdir:
-            mp3_path = download_youtube_theme_mp3(youtube_url, tmpdir)
+            mp3_path = download_youtube_theme_mp3(
+                youtube_url,
+                tmpdir,
+                start_seconds=start_seconds,
+                end_seconds=end_seconds,
+            )
             local_path.mkdir(parents=True, exist_ok=True)
             shutil.move(str(mp3_path), str(theme_path))
 
@@ -1377,6 +1390,13 @@ def download_provider_from_youtube(provider, item_id):
             return jsonify({'error': 'Only YouTube URLs are supported'}), 400
 
         overwrite = data.get('overwrite', False)
+        try:
+            start_seconds, end_seconds = normalize_youtube_trim_window(
+                data.get('start_time'),
+                data.get('end_time'),
+            )
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
         context = _get_item_context(provider, item_id)
 
         local_path = _validate_local_media_path(context['local_path'])
@@ -1388,7 +1408,12 @@ def download_provider_from_youtube(provider, item_id):
             return jsonify({'error': 'Theme already exists', 'exists': True}), 409
 
         with tempfile.TemporaryDirectory(dir=YTDLP_WORKDIR) as tmpdir:
-            mp3_path = download_youtube_theme_mp3(youtube_url, tmpdir)
+            mp3_path = download_youtube_theme_mp3(
+                youtube_url,
+                tmpdir,
+                start_seconds=start_seconds,
+                end_seconds=end_seconds,
+            )
             local_path.mkdir(parents=True, exist_ok=True)
             shutil.move(str(mp3_path), str(theme_path))
 
