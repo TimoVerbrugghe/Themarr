@@ -3,6 +3,7 @@ services:
     build: .
     container_name: themarr
     # Security hardening
+    init: true
     security_opt:
       - no-new-privileges=true
     cap_drop:

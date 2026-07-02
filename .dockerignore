@@ -1,0 +1,17 @@
+.env
+.env.*
+.git
+.github
+.idea
+.pytest_cache
+.vscode
+__pycache__
+*.log
+*.pyc
+*.pyo
+.DS_Store
+coverage
+dist
+htmlcov
+screenshots
+tests

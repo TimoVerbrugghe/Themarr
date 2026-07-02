@@ -125,12 +125,17 @@ README screenshots section to match the generated files.
 
 ## Implementation constraints
 
-- Keep behavior Docker-compatible (Python 3.11-slim base image).
+- Keep behavior Docker-compatible (Python 3.14-slim base image).
 - Keep changes minimal and directly related to the user request.
 - Keep environment variable names stable unless explicitly asked to migrate them.
 - Do not hardcode credentials, server URLs, or filesystem paths.
 - Favor explicit logging and clear error messages.
 - Update README when setup/behavior/config changes.
+- Keep `README.md` focused on user-facing features, setup, and operational usage.
+  Put backend implementation rationale, container hardening details, and
+  agent/developer workflow guidance in this instruction file or other
+  repository instructions instead of expanding the README with internal
+  engineering detail unless users must act on it directly.
 - Re-run validation commands after edits.
 - When modifying `app/` modules, check that all imports in `web_app.py` still resolve correctly.
 - **Keep CSP-compatible frontend code.** Do not add inline JavaScript in templates:
@@ -164,6 +169,22 @@ README screenshots section to match the generated files.
 - **API key**: `GET /api/settings/runtime` is an **authenticated** endpoint — it requires a valid session cookie or API key header and returns the actual key in the response. The key is never written to `localStorage`. Users log in via the Settings page; the server sets an httpOnly session cookie (`POST /api/auth/login`). The key is kept in JS memory (`apiKey`) for the lifetime of the tab. When `API_KEY` is not set, the auto-generated startup API key is printed to the container log at startup.
 - **yt-dlp**: `remote_components` must NOT be enabled (supply-chain risk — fetches and executes JS from GitHub at runtime).
 - **ThemerrDB URLs**: always validate with `is_valid_youtube_url()` before passing to yt-dlp.
+
+## Container hardening notes
+
+- The Docker runtime baseline is Python 3.14 slim unless the user explicitly
+  requests a different runtime line and the full validation set has been rerun.
+- Prefer multi-stage builds that keep build tooling out of the final image.
+- Preserve YouTube support while minimizing runtime package exposure:
+  keep only the Node runtime needed by yt-dlp and only the OS packages required
+  at runtime.
+- Prefer official runtime stages over adding third-party apt repositories when
+  the required runtime can be copied from an upstream image.
+- Keep the deployment posture hardened: non-root container user, read-only root
+  filesystem compatibility, dropped Linux capabilities, `no-new-privileges`,
+  small writable tmpfs mounts, and an init process for child-process reaping.
+- Prefer exposing Themarr through a trusted reverse proxy or private network
+  segment so only intended clients can reach the Web UI and webhook endpoints.
 
 ## Key web UI files
 

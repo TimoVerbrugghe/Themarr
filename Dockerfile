@@ -1,44 +1,47 @@
-FROM python:3.14-slim
+FROM node:22-bookworm-slim AS node-runtime
 
-# Install system dependencies:
-#  - ffmpeg: for yt-dlp audio extraction
-#  - nodejs (≥22): yt-dlp requires Node.js 22+ as its JavaScript runtime for YouTube extraction
-#  Use the official NodeSource signed apt repository instead of the curl|bash installer.
-RUN apt-get update && apt-get install -y --no-install-recommends gnupg ca-certificates curl && \
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-        | gpg --dearmor -o /usr/share/keyrings/nodesource.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
-        > /etc/apt/sources.list.d/nodesource.list && \
-    apt-get update && apt-get install -y --no-install-recommends ffmpeg nodejs && \
-    rm -rf /usr/lib/node_modules/npm && \
-    rm -f /usr/bin/npm /usr/bin/npx /bin/npm /bin/npx && \
-    apt-get purge -y --auto-remove gnupg curl && \
-    rm -f /etc/apt/sources.list.d/nodesource.list /usr/share/keyrings/nodesource.gpg && \
-    rm -rf /var/lib/apt/lists/* && \
-    rm -rf /var/cache/apt/*
+FROM python:3.14-slim-bookworm AS python-deps
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    VIRTUAL_ENV=/opt/venv
+
+RUN python -m venv "$VIRTUAL_ENV"
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 WORKDIR /app
 
-# Create non-root user for running the application
-RUN groupadd -r themarr && useradd -r -g themarr themarr
-
-# Install Python dependencies (production only — test deps excluded)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
-# Copy application files
-COPY app/ app/
-COPY templates/ templates/
-COPY static/ static/
+FROM python:3.14-slim-bookworm
 
-# Fix permissions for the non-root user
-RUN chown -R themarr:themarr /app
+ENV PATH="/opt/venv/bin:$PATH" \
+    HOME=/tmp \
+    XDG_CACHE_HOME=/tmp/.cache \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# Expose Web UI port
+# Install only the runtime OS packages needed for Themarr's media pipeline.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN groupadd --system themarr && \
+    useradd --system --gid themarr --home-dir /nonexistent --shell /usr/sbin/nologin themarr
+
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+RUN ln -sf /usr/local/bin/node /usr/local/bin/nodejs
+
+COPY --from=python-deps /opt/venv /opt/venv
+COPY --chown=themarr:themarr app/ app/
+COPY --chown=themarr:themarr templates/ templates/
+COPY --chown=themarr:themarr static/ static/
+
 EXPOSE 8080
 
-# Switch to non-root user
 USER themarr
 
-# Default: run the Web UI
 CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "8", "--timeout", "120", "app.web_app:app"]
