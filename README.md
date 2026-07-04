@@ -24,11 +24,17 @@ You can also upload custom MP3 files and copy existing local themes between item
   Download from **Plex** (Plex items), **ThemerrDB** (Plex + Jellyfin), or **YouTube**.
   YouTube downloads support optional start/stop trim times in the modal.
 
+- **Audio normalization**  
+  Newly downloaded themes are normalized to **-24 LUFS** with FFmpeg `loudnorm` to reduce volume jumps between items.
+
+- **Automatic ID3 metadata tagging**  
+  Theme files are tagged with title/album/genre metadata, embed available artwork, and normalize album names by removing trailing year suffixes like `"(2020)"`.
+
 - **Upload and copy local themes**  
   Upload custom MP3 files or copy `theme.mp3` between items/libraries.
 
 - **Bulk actions**  
-  Multi-select and bulk download themes from provider source for Plex libraries.
+  Multi-select Plex items to bulk download themes, or bulk post-process existing local `theme.mp3` files (normalize audio + add missing metadata without overwriting existing tags).
 
 - **Plex + Jellyfin webhooks**  
   Automatically process new library items from webhook events.

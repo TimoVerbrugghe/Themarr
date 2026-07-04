@@ -35,6 +35,9 @@ from app.youtube_utils import (
     extract_youtube_audio_url, is_valid_audio_stream_url, download_youtube_theme_mp3,
     normalize_youtube_trim_window,
 )
+from app.theme_audio import (
+    apply_theme_id3_tags, build_theme_metadata, normalize_theme_audio,
+)
 from app.plex_utils import (
     get_plex, plex_is_configured, plex_session_get, get_section_base_paths,
     get_item_local_path, get_validated_plex_local_path, download_plex_theme_to_path,
@@ -80,7 +83,7 @@ from app.webhook_handlers import (
     check_webhook_server_uuid, process_plex_library_new, process_jellyfin_item_added,
     _is_jellyfin_item_added_event, _jellyfin_webhook_event_name, _extract_jellyfin_item_id,
 )
-from app.bulk_operations import bulk_download_themes
+from app.bulk_operations import bulk_download_themes, bulk_postprocess_themes
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -201,6 +204,53 @@ def _download_youtube_theme_to_path(youtube_url, theme_path):
         mp3_path = download_youtube_theme_mp3(youtube_url, tmpdir)
         theme_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(mp3_path), str(theme_path))
+    _postprocess_theme_audio(
+        theme_path,
+        provider='jellyfin',
+        item=None,
+        item_id=None,
+        title_fallback=theme_path.parent.name,
+        client=None,
+    )
+
+
+def _fetch_theme_artwork(provider, client, item, item_id):
+    """Fetch poster bytes for ID3 cover art tagging (best effort)."""
+    try:
+        if provider == 'plex' and client and item is not None:
+            thumb = getattr(item, 'thumb', None)
+            if thumb:
+                return fetch_poster_bytes(client, thumb, timeout=10)
+        if provider == 'jellyfin' and client and item_id:
+            response = jellyfin_session_get(client, f'/Items/{item_id}/Images/Primary')
+            response.raise_for_status()
+            return response.content, response.headers.get('content-type', 'image/jpeg')
+    except Exception as exc:
+        logger.info('Skipping artwork embedding for theme item')
+    return None, None
+
+
+def _postprocess_theme_audio(theme_path, provider, item, item_id, title_fallback, client):
+    """Normalize audio and inject ID3 tags for a saved theme file."""
+    normalized = normalize_theme_audio(theme_path)
+    if not normalized:
+        logger.info('Theme normalization skipped or failed for theme item')
+    metadata = build_theme_metadata(provider, item, title_fallback)
+    artwork_bytes, artwork_mime = _fetch_theme_artwork(provider, client, item, item_id)
+    apply_theme_id3_tags(theme_path, metadata, artwork_bytes=artwork_bytes, artwork_mime=artwork_mime)
+
+
+def _download_plex_theme_to_path_with_processing(plex, item, theme_path):
+    """Download a Plex theme and apply normalization + ID3 metadata."""
+    download_plex_theme_to_path(plex, item, theme_path)
+    _postprocess_theme_audio(
+        theme_path,
+        provider='plex',
+        item=item,
+        item_id=str(getattr(item, 'ratingKey', '')),
+        title_fallback=getattr(item, 'title', 'Unknown'),
+        client=plex,
+    )
 
 
 def _trigger_metadata_refresh(provider, item, item_id, local_path):
@@ -764,6 +814,14 @@ def download_theme_from_plex(rating_key):
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     file_handle.write(chunk)
+        _postprocess_theme_audio(
+            theme_path,
+            provider='plex',
+            item=item,
+            item_id=str(rating_key),
+            title_fallback=item.title,
+            client=plex,
+        )
 
         logger.info('Downloaded theme for %s to %s', item.title, theme_path)
         send_pushover_notification('Theme Downloaded', f'{item.title} theme downloaded from Plex', trigger=TRIGGER_UI)
@@ -972,6 +1030,14 @@ def download_from_youtube(rating_key):
             )
             local_path.mkdir(parents=True, exist_ok=True)
             shutil.move(str(mp3_path), str(theme_path))
+        _postprocess_theme_audio(
+            theme_path,
+            provider='plex',
+            item=item,
+            item_id=str(rating_key),
+            title_fallback=item.title,
+            client=plex,
+        )
 
         logger.info('Downloaded YouTube theme for %s to %s', item.title, theme_path)
         send_pushover_notification('Theme Downloaded', f'{item.title} theme downloaded from YouTube', trigger=TRIGGER_UI)
@@ -1073,6 +1139,14 @@ def download_from_themerrdb(rating_key):
             mp3_path = download_youtube_theme_mp3(youtube_url, tmpdir)
             local_path.mkdir(parents=True, exist_ok=True)
             shutil.move(str(mp3_path), str(theme_path))
+        _postprocess_theme_audio(
+            theme_path,
+            provider='plex',
+            item=item,
+            item_id=str(rating_key),
+            title_fallback=item.title,
+            client=plex,
+        )
         
         logger.info('Downloaded ThemerrDB theme for %s to %s', item.title, theme_path)
         send_pushover_notification('Theme Downloaded', f'{item.title} theme downloaded from ThemerrDB', trigger=TRIGGER_UI)
@@ -1261,6 +1335,14 @@ def download_provider_from_themerrdb(provider, item_id):
             mp3_path = download_youtube_theme_mp3(youtube_url, tmpdir)
             local_path.mkdir(parents=True, exist_ok=True)
             shutil.move(str(mp3_path), str(theme_path))
+        _postprocess_theme_audio(
+            theme_path,
+            provider=provider,
+            item=context.get('item'),
+            item_id=context.get('item_id'),
+            title_fallback=context.get('title') or 'Unknown',
+            client=context.get('client'),
+        )
 
         logger.info('Downloaded ThemerrDB theme for %s item', provider)
         send_pushover_notification('Theme Downloaded', f"{context['title']} theme downloaded from ThemerrDB", trigger=TRIGGER_UI)
@@ -1423,6 +1505,14 @@ def download_provider_from_youtube(provider, item_id):
             )
             local_path.mkdir(parents=True, exist_ok=True)
             shutil.move(str(mp3_path), str(theme_path))
+        _postprocess_theme_audio(
+            theme_path,
+            provider=provider,
+            item=context.get('item'),
+            item_id=context.get('item_id'),
+            title_fallback=context.get('title') or 'Unknown',
+            client=context.get('client'),
+        )
 
         logger.info('Downloaded YouTube theme for %s item', provider)
         send_pushover_notification('Theme Downloaded', f"{context['title']} theme downloaded from YouTube", trigger=TRIGGER_UI)
@@ -1471,6 +1561,12 @@ def bulk_download_themes_route():
     return bulk_download_themes()
 
 
+@app.route('/api/bulk/theme/postprocess', methods=['POST'])
+def bulk_postprocess_themes_route():
+    """Route handler for bulk theme normalization and metadata tagging."""
+    return bulk_postprocess_themes()
+
+
 # ============================================================
 # Webhook Helpers — Plex
 # ============================================================
@@ -1516,7 +1612,7 @@ def plex_webhook():
         
         rating_key = metadata.get('ratingKey')
         if rating_key:
-            fn = partial(process_plex_library_new, download_plex_theme_fn=download_plex_theme_to_path)
+            fn = partial(process_plex_library_new, download_plex_theme_fn=_download_plex_theme_to_path_with_processing)
             future = _submit_background_job(f'webhook-plex-{rating_key}', fn, rating_key)
             if future is None:
                 logger.warning('Plex webhook: failed to queue processing for ratingKey=%s', rating_key)
