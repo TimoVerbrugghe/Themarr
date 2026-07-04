@@ -300,9 +300,10 @@ def _bulk_postprocess_jellyfin(item_id, results):
     jellyfin, _, item = get_jellyfin_item(item_id)
     raw_id = item.get('Id') or ''
     try:
-        # Parse and reconstruct the UUID — uuid.UUID() validates the format strictly,
-        # and str() of the resulting object creates a new canonical string that CodeQL
-        # recognizes as sanitized input, breaking the taint chain from user-supplied item_id.
+        # UUID-validate the server-returned Id and use it only for internal API calls
+        # (artwork fetch, cache sync, metadata refresh).  Result dicts use the already-
+        # validated item_id from _parse_bulk_items so no HTTP-response-derived string
+        # reaches the JSON response (avoids CodeQL py/reflective-xss taint path).
         item_key = str(uuid.UUID(raw_id))
     except ValueError:
         logger.warning(
@@ -316,12 +317,12 @@ def _bulk_postprocess_jellyfin(item_id, results):
     raw_path = get_jellyfin_item_local_path(item)
     local_path = _validate_local_media_path(raw_path) if raw_path else None
     if not local_path:
-        results['failed'].append({'itemId': item_key, 'title': title, 'error': 'Cannot determine local path'})
+        results['failed'].append({'itemId': item_id, 'title': title, 'error': 'Cannot determine local path'})
         return
 
     theme_path = _theme_file_path(local_path)
     if not has_nonempty_theme_file(local_path):
-        results['no_theme'].append({'itemId': item_key, 'title': title})
+        results['no_theme'].append({'itemId': item_id, 'title': title})
         return
 
     already_normalized = is_theme_audio_normalized(theme_path)
@@ -345,7 +346,7 @@ def _bulk_postprocess_jellyfin(item_id, results):
 
     if normalized or tagged:
         results['processed'].append({
-            'itemId': item_key,
+            'itemId': item_id,
             'title': title,
             'normalized': normalized,
             'tagged': tagged,
@@ -360,7 +361,7 @@ def _bulk_postprocess_jellyfin(item_id, results):
         if already_tagged:
             reasons.append('already_tagged')
         results['skipped'].append({
-            'itemId': item_key,
+            'itemId': item_id,
             'title': title,
             'reason': ','.join(reasons) or 'no_changes_needed',
         })
