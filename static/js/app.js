@@ -72,8 +72,8 @@ function syncPlexFeatureVisibility() {
   if (plexHeading) plexHeading.classList.toggle('hidden', !plexConfigured);
   if (plexNav) plexNav.classList.toggle('hidden', !plexConfigured);
   if (plexFilterOption) plexFilterOption.classList.toggle('hidden', !plexConfigured);
-  if (bulkBtn) bulkBtn.classList.toggle('hidden', !plexConfigured);
-  if (bulkPostprocessBtn) bulkPostprocessBtn.classList.toggle('hidden', !plexConfigured);
+  if (bulkBtn) bulkBtn.classList.toggle('hidden', !plexConfigured && !jellyfinConfigured);
+  if (bulkPostprocessBtn) bulkPostprocessBtn.classList.toggle('hidden', !plexConfigured && !jellyfinConfigured);
   if (plexSourceBtn) plexSourceBtn.classList.toggle('hidden', !plexConfigured);
   if (settingsPlexTestBtn) settingsPlexTestBtn.classList.toggle('hidden', !plexConfigured);
   if (settingsJellyfinTestBtn) settingsJellyfinTestBtn.classList.toggle('hidden', !jellyfinConfigured);
@@ -665,14 +665,12 @@ async function selectLibrary(provider, id, title) {
   const bulkBtn = document.getElementById('btn-bulk-download');
   const bulkPostprocessBtn = document.getElementById('btn-bulk-postprocess');
   if (bulkBtn) {
-    bulkBtn.disabled = provider !== 'plex';
-    bulkBtn.textContent = provider === 'plex' ? '↓ Download Themes' : '↓ Download from Plex (Plex only)';
+    bulkBtn.disabled = false;
+    bulkBtn.textContent = '↓ Download Themes';
   }
   if (bulkPostprocessBtn) {
-    bulkPostprocessBtn.disabled = provider !== 'plex';
-    bulkPostprocessBtn.textContent = provider === 'plex'
-      ? '♫ Normalize + Tag'
-      : '♫ Normalize + Tag (Plex only)';
+    bulkPostprocessBtn.disabled = false;
+    bulkPostprocessBtn.textContent = '♫ Normalize + Tag';
   }
 
   document.querySelectorAll('.library-nav-item').forEach((el) => el.classList.remove('active'));
@@ -1209,13 +1207,9 @@ function deselectAll() {
 
 async function bulkDownload() {
   if (selectedItems.size === 0) return;
-  if (currentLibraryProvider !== 'plex') {
-    showToast('info', 'Bulk download from provider source is only available for Plex libraries.');
-    return;
-  }
-  const ratingKeys = currentItems
+  const items = currentItems
     .filter((item) => selectedItems.has(itemSelectionKey(item)))
-    .map((item) => item.ratingKey);
+    .map((item) => ({ provider: item.provider || 'plex', itemId: String(item.id || item.ratingKey) }));
 
   // Check how many selected items already have a local theme
   const itemsWithTheme = currentItems.filter(
@@ -1223,7 +1217,7 @@ async function bulkDownload() {
   );
 
   if (itemsWithTheme.length > 0) {
-    const total = ratingKeys.length;
+    const total = items.length;
     const count = itemsWithTheme.length;
     const selectionLabel = count !== 1 ? 'items' : 'item';
     const verb = count !== 1 ? 'have' : 'has';
@@ -1245,16 +1239,15 @@ async function confirmBulkDownload(overwrite) {
 
 async function executeBulkDownload(overwrite) {
   if (selectedItems.size === 0) return;
-  if (currentLibraryProvider !== 'plex') return;
-  const ratingKeys = currentItems
+  const items = currentItems
     .filter((item) => selectedItems.has(itemSelectionKey(item)))
-    .map((item) => item.ratingKey);
+    .map((item) => ({ provider: item.provider || 'plex', itemId: String(item.id || item.ratingKey) }));
   const btn = document.getElementById('btn-bulk-download');
   const origText = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Downloading…';
   try {
-    const data = await apiPost('/api/bulk/theme/download', { ratingKeys, overwrite });
+    const data = await apiPost('/api/bulk/theme/download', { items, overwrite });
     if (data?.error) throw new Error(data.error);
     const s = data.success?.length ?? 0;
     const sk = data.skipped?.length ?? 0;
@@ -1279,20 +1272,16 @@ async function executeBulkDownload(overwrite) {
 
 async function bulkPostprocessThemes() {
   if (selectedItems.size === 0) return;
-  if (currentLibraryProvider !== 'plex') {
-    showToast('info', 'Bulk normalize/tag is only available for Plex libraries.');
-    return;
-  }
 
-  const ratingKeys = currentItems
+  const items = currentItems
     .filter((item) => selectedItems.has(itemSelectionKey(item)))
-    .map((item) => item.ratingKey);
+    .map((item) => ({ provider: item.provider || 'plex', itemId: String(item.id || item.ratingKey) }));
   const btn = document.getElementById('btn-bulk-postprocess');
   const origText = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Processing…';
   try {
-    const data = await apiPost('/api/bulk/theme/postprocess', { ratingKeys });
+    const data = await apiPost('/api/bulk/theme/postprocess', { items });
     if (data?.error) throw new Error(data.error);
     const p = data.processed?.length ?? 0;
     const sk = data.skipped?.length ?? 0;
@@ -1300,11 +1289,11 @@ async function bulkPostprocessThemes() {
     const n = data.no_theme?.length ?? 0;
     showToast('success', `Bulk done: ${p} processed, ${sk} skipped, ${n} no theme, ${f} failed`);
     if (p > 0 && currentLibraryId) {
-      const items = await fetchLibraryItems(currentLibraryProvider, currentLibraryId);
-      libraryCache.set(makeLibraryCacheKey(currentLibraryProvider, currentLibraryId), items);
-      currentItems = items;
-      updateStats(items);
-      renderItems(items);
+      const updatedItems = await fetchLibraryItems(currentLibraryProvider, currentLibraryId);
+      libraryCache.set(makeLibraryCacheKey(currentLibraryProvider, currentLibraryId), updatedItems);
+      currentItems = updatedItems;
+      updateStats(updatedItems);
+      renderItems(updatedItems);
     }
   } catch (err) {
     showToast('error', `Bulk normalize/tag failed: ${err}`);
