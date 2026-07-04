@@ -53,6 +53,8 @@ def _parse_bulk_items(data):
         item_id = str(entry.get('itemId') or '')
         if not item_id:
             return None, (jsonify({'error': 'Each item must have a non-empty itemId'}), 400)
+        if '/' in item_id or '\\' in item_id:
+            return None, (jsonify({'error': 'itemId must not contain path separator characters'}), 400)
         validated.append({'provider': provider, 'itemId': item_id})
     return validated, None
 
@@ -199,7 +201,7 @@ def _bulk_download_jellyfin(item_id, overwrite, results):
     results['success'].append({'itemId': item_id, 'title': title})
     sync_cached_item_theme_state('jellyfin', item_id)
     refresh_jellyfin_item_metadata(item_id)
-    logger.info('Bulk: downloaded ThemerrDB theme for Jellyfin item %s', title)
+    logger.info('Bulk: downloaded ThemerrDB theme for Jellyfin item %s', item_id)
 
 
 def bulk_postprocess_themes():
@@ -334,7 +336,7 @@ def _bulk_postprocess_jellyfin(item_id, results):
         })
         sync_cached_item_theme_state('jellyfin', item_id)
         refresh_jellyfin_item_metadata(item_id)
-        logger.info('Bulk post-process: updated Jellyfin theme for %s', title)
+        logger.info('Bulk post-process: updated Jellyfin theme for item %s', item_id)
     else:
         reasons = []
         if already_normalized:

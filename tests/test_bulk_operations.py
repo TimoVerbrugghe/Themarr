@@ -52,6 +52,11 @@ class TestBulkDownload:
                            json={'items': [{'provider': 'unknown', 'itemId': '1'}]})
         assert resp.status_code == 400
 
+    def test_bulk_download_item_id_with_path_separator_rejected(self, client, mock_plex):
+        resp = client.post('/api/bulk/theme/download',
+                           json={'items': [{'provider': 'jellyfin', 'itemId': '../etc/passwd'}]})
+        assert resp.status_code == 400
+
     def test_bulk_download_skips_existing(self, client, mock_plex, tmp_path):
         show_dir = tmp_path / 'Test Show (2020)'
         show_dir.mkdir()
