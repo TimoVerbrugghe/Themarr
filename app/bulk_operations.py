@@ -222,7 +222,8 @@ def bulk_postprocess_themes():
             else:
                 _bulk_postprocess_jellyfin(item_id, results)
         except Exception as exc:
-            results['failed'].append({'itemId': item_id, 'provider': provider, 'error': str(exc)})
+            logger.warning('Bulk post-process: unexpected error for item %s (%s): %s', item_id, provider, exc)
+            results['failed'].append({'error': 'Unexpected error processing item'})
 
     return jsonify(results)
 
@@ -231,10 +232,11 @@ def _bulk_postprocess_plex(rating_key, results):
     """Normalize and tag existing theme for one Plex item; appends to results in-place."""
     plex = get_plex()
     item = plex.fetchItem(int(rating_key))
+    item_key = str(item.ratingKey)  # use server-returned key, not user input
     local_path = get_validated_plex_local_path(item)
     if not local_path:
         results['failed'].append({
-            'itemId': rating_key,
+            'itemId': item_key,
             'title': getattr(item, 'title', '?'),
             'error': 'Cannot determine local path',
         })
@@ -242,7 +244,7 @@ def _bulk_postprocess_plex(rating_key, results):
 
     theme_path = _theme_file_path(local_path)
     if not has_nonempty_theme_file(local_path):
-        results['no_theme'].append({'itemId': rating_key, 'title': item.title})
+        results['no_theme'].append({'itemId': item_key, 'title': item.title})
         return
 
     already_normalized = is_theme_audio_normalized(theme_path)
@@ -271,12 +273,12 @@ def _bulk_postprocess_plex(rating_key, results):
 
     if normalized or tagged:
         results['processed'].append({
-            'itemId': rating_key,
+            'itemId': item_key,
             'title': item.title,
             'normalized': normalized,
             'tagged': tagged,
         })
-        sync_cached_item_theme_state('plex', str(item.ratingKey))
+        sync_cached_item_theme_state('plex', item_key)
         refresh_plex_item_metadata(item)
         logger.info('Bulk post-process: updated Plex theme for %s', item.title)
     else:
@@ -286,7 +288,7 @@ def _bulk_postprocess_plex(rating_key, results):
         if already_tagged:
             reasons.append('already_tagged')
         results['skipped'].append({
-            'itemId': rating_key,
+            'itemId': item_key,
             'title': item.title,
             'reason': ','.join(reasons) or 'no_changes_needed',
         })
@@ -295,17 +297,21 @@ def _bulk_postprocess_plex(rating_key, results):
 def _bulk_postprocess_jellyfin(item_id, results):
     """Normalize and tag existing theme for one Jellyfin item; appends to results in-place."""
     jellyfin, _, item = get_jellyfin_item(item_id)
+    item_key = item.get('Id')
+    if not item_key:
+        logger.warning('Bulk post-process: Jellyfin item %s returned without an Id', item_id)
+        raise ValueError('Jellyfin item returned without an Id')
     title = item.get('Name') or 'Unknown'
 
     raw_path = get_jellyfin_item_local_path(item)
     local_path = _validate_local_media_path(raw_path) if raw_path else None
     if not local_path:
-        results['failed'].append({'itemId': item_id, 'title': title, 'error': 'Cannot determine local path'})
+        results['failed'].append({'itemId': item_key, 'title': title, 'error': 'Cannot determine local path'})
         return
 
     theme_path = _theme_file_path(local_path)
     if not has_nonempty_theme_file(local_path):
-        results['no_theme'].append({'itemId': item_id, 'title': title})
+        results['no_theme'].append({'itemId': item_key, 'title': title})
         return
 
     already_normalized = is_theme_audio_normalized(theme_path)
@@ -318,7 +324,7 @@ def _bulk_postprocess_jellyfin(item_id, results):
 
     if not already_tagged:
         metadata = build_theme_metadata('jellyfin', item, title)
-        artwork_bytes, artwork_mime = _get_jellyfin_artwork(jellyfin, item_id)
+        artwork_bytes, artwork_mime = _get_jellyfin_artwork(jellyfin, item_key)
         tagged = apply_theme_id3_tags(
             theme_path,
             metadata,
@@ -329,13 +335,13 @@ def _bulk_postprocess_jellyfin(item_id, results):
 
     if normalized or tagged:
         results['processed'].append({
-            'itemId': item_id,
+            'itemId': item_key,
             'title': title,
             'normalized': normalized,
             'tagged': tagged,
         })
-        sync_cached_item_theme_state('jellyfin', item_id)
-        refresh_jellyfin_item_metadata(item_id)
+        sync_cached_item_theme_state('jellyfin', item_key)
+        refresh_jellyfin_item_metadata(item_key)
         logger.info('Bulk post-process: updated Jellyfin theme for item %s', item_id)
     else:
         reasons = []
@@ -344,7 +350,7 @@ def _bulk_postprocess_jellyfin(item_id, results):
         if already_tagged:
             reasons.append('already_tagged')
         results['skipped'].append({
-            'itemId': item_id,
+            'itemId': item_key,
             'title': title,
             'reason': ','.join(reasons) or 'no_changes_needed',
         })
