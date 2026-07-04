@@ -49,7 +49,7 @@ def _parse_bulk_items(data):
             return None, (jsonify({'error': 'Each item must be an object with provider and itemId'}), 400)
         provider = (entry.get('provider') or 'plex').strip().lower()
         if provider not in ('plex', 'jellyfin'):
-            return None, (jsonify({'error': f'Unknown provider: {provider}'}), 400)
+            return None, (jsonify({'error': 'Provider must be "plex" or "jellyfin"'}), 400)
         item_id = str(entry.get('itemId') or '')
         if not item_id:
             return None, (jsonify({'error': 'Each item must have a non-empty itemId'}), 400)
