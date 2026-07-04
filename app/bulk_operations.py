@@ -3,6 +3,7 @@
 import logging
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 
 from flask import request, jsonify
@@ -66,8 +67,8 @@ def _get_jellyfin_artwork(jellyfin, item_id):
         if response.status_code == 200:
             content_type = response.headers.get('content-type', 'image/jpeg')
             return response.content, content_type
-    except Exception as exc:
-        logger.info('Bulk: Jellyfin artwork fetch failed for item %s: %s', item_id, exc)
+    except Exception:
+        logger.info('Bulk: Jellyfin artwork fetch failed for item %s', item_id)
     return None, None
 
 
@@ -297,10 +298,13 @@ def _bulk_postprocess_plex(rating_key, results):
 def _bulk_postprocess_jellyfin(item_id, results):
     """Normalize and tag existing theme for one Jellyfin item; appends to results in-place."""
     jellyfin, _, item = get_jellyfin_item(item_id)
-    item_key = item.get('Id')
-    if not item_key:
-        logger.warning('Bulk post-process: Jellyfin item %s returned without an Id', item_id)
-        raise ValueError('Jellyfin item returned without an Id')
+    raw_id = item.get('Id') or ''
+    try:
+        # Validate UUID format and reconstruct — breaks taint chain from user-supplied item_id
+        item_key = str(uuid.UUID(raw_id))
+    except ValueError:
+        logger.warning('Bulk post-process: Jellyfin item %s returned without a valid Id', item_id)
+        raise ValueError('Jellyfin item returned without a valid Id')
     title = item.get('Name') or 'Unknown'
 
     raw_path = get_jellyfin_item_local_path(item)

@@ -240,8 +240,9 @@ class TestBulkPostprocess:
         show_dir = tmp_path / 'Test Show (2020)'
         show_dir.mkdir()
         (show_dir / 'theme.mp3').write_bytes(b'audio_data')
+        jf_id = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
         jf_item = {
-            'Id': 'jf-xyz',
+            'Id': jf_id,
             'Name': 'Test Show',
             'Type': 'Series',
             'Path': str(show_dir),
@@ -254,18 +255,19 @@ class TestBulkPostprocess:
              patch('app.bulk_operations.sync_cached_item_theme_state'), \
              patch('app.bulk_operations.refresh_jellyfin_item_metadata'), \
              patch('app.bulk_operations._get_jellyfin_artwork', return_value=(None, None)):
-            resp = client.post('/api/bulk/theme/postprocess', json={'items': [_jellyfin_item('jf-xyz')]})
+            resp = client.post('/api/bulk/theme/postprocess', json={'items': [_jellyfin_item(jf_id)]})
 
         assert resp.status_code == 200
         data = resp.get_json()
         assert len(data['processed']) == 1
-        assert data['processed'][0]['itemId'] == 'jf-xyz'
+        assert data['processed'][0]['itemId'] == jf_id
 
     def test_bulk_postprocess_jellyfin_no_theme(self, client, tmp_path):
         show_dir = tmp_path / 'Test Show (2020)'
         show_dir.mkdir()
+        jf_id = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
         jf_item = {
-            'Id': 'jf-xyz',
+            'Id': jf_id,
             'Name': 'Test Show',
             'Type': 'Series',
             'Path': str(show_dir),
@@ -273,7 +275,7 @@ class TestBulkPostprocess:
         mock_jellyfin = {'url': 'http://jf', 'api_key': 'key', 'user_id': 'uid'}
 
         with patch('app.bulk_operations.get_jellyfin_item', return_value=(mock_jellyfin, 'uid', jf_item)):
-            resp = client.post('/api/bulk/theme/postprocess', json={'items': [_jellyfin_item('jf-xyz')]})
+            resp = client.post('/api/bulk/theme/postprocess', json={'items': [_jellyfin_item(jf_id)]})
 
         assert resp.status_code == 200
         data = resp.get_json()
