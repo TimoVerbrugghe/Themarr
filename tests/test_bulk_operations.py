@@ -1,6 +1,8 @@
 """Tests for app/bulk_operations.py — bulk theme download."""
 from unittest.mock import MagicMock, patch
 
+from mutagen.id3 import ID3, TALB, TCON, TIT2, TXXX
+
 from tests.helpers import make_mock_show
 
 
@@ -97,3 +99,47 @@ class TestBulkDownload:
         data = resp.get_json()
         assert len(data['success']) == 1
         assert web_app._library_cache[1][0]['has_local_theme'] is True
+
+
+class TestBulkPostprocess:
+    def test_bulk_postprocess_success(self, client, mock_plex, tmp_path):
+        show_dir = tmp_path / 'Test Show (2020)'
+        show_dir.mkdir()
+        theme_path = show_dir / 'theme.mp3'
+        theme_path.write_bytes(b'audio_data')
+        show = make_mock_show(location=str(show_dir))
+        show.thumb = None
+        mock_plex.fetchItem.return_value = show
+
+        with patch('app.bulk_operations.normalize_theme_audio', return_value=True):
+            resp = client.post('/api/bulk/theme/postprocess', json={'ratingKeys': [1]})
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data['processed']) == 1
+        assert data['processed'][0]['normalized'] is True
+        assert data['processed'][0]['tagged'] is True
+
+    def test_bulk_postprocess_skips_when_already_normalized_and_tagged(self, client, mock_plex, tmp_path):
+        show_dir = tmp_path / 'Test Show (2020)'
+        show_dir.mkdir()
+        theme_path = show_dir / 'theme.mp3'
+        theme_path.write_bytes(b'audio_data')
+        tags = ID3()
+        tags.add(TIT2(encoding=3, text='Existing Theme'))
+        tags.add(TALB(encoding=3, text='Existing Album'))
+        tags.add(TCON(encoding=3, text='Soundtrack'))
+        tags.add(TXXX(encoding=3, desc='ThemarrNormalizedLUFS', text=['-24']))
+        tags.save(str(theme_path), v2_version=3)
+
+        show = make_mock_show(location=str(show_dir))
+        mock_plex.fetchItem.return_value = show
+
+        with patch('app.bulk_operations.normalize_theme_audio') as mock_normalize:
+            resp = client.post('/api/bulk/theme/postprocess', json={'ratingKeys': [1]})
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data['skipped']) == 1
+        assert data['skipped'][0]['reason'] == 'already_normalized,already_tagged'
+        mock_normalize.assert_not_called()

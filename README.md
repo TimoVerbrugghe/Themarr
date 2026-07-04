@@ -34,7 +34,7 @@ You can also upload custom MP3 files and copy existing local themes between item
   Upload custom MP3 files or copy `theme.mp3` between items/libraries.
 
 - **Bulk actions**  
-  Multi-select and bulk download themes from provider source for Plex libraries.
+  Multi-select Plex items to bulk download themes, or bulk post-process existing local `theme.mp3` files (normalize audio + add missing metadata without overwriting existing tags).
 
 - **Plex + Jellyfin webhooks**  
   Automatically process new library items from webhook events.

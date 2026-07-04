@@ -64,6 +64,7 @@ function syncPlexFeatureVisibility() {
   const plexNav = document.getElementById('library-nav');
   const plexFilterOption = document.getElementById('filter-plex-option');
   const bulkBtn = document.getElementById('btn-bulk-download');
+  const bulkPostprocessBtn = document.getElementById('btn-bulk-postprocess');
   const plexSourceBtn = document.getElementById('get-theme-btn-plex');
   const settingsPlexTestBtn = document.getElementById('settings-test-plex-btn');
   const settingsJellyfinTestBtn = document.getElementById('settings-test-jellyfin-btn');
@@ -72,6 +73,7 @@ function syncPlexFeatureVisibility() {
   if (plexNav) plexNav.classList.toggle('hidden', !plexConfigured);
   if (plexFilterOption) plexFilterOption.classList.toggle('hidden', !plexConfigured);
   if (bulkBtn) bulkBtn.classList.toggle('hidden', !plexConfigured);
+  if (bulkPostprocessBtn) bulkPostprocessBtn.classList.toggle('hidden', !plexConfigured);
   if (plexSourceBtn) plexSourceBtn.classList.toggle('hidden', !plexConfigured);
   if (settingsPlexTestBtn) settingsPlexTestBtn.classList.toggle('hidden', !plexConfigured);
   if (settingsJellyfinTestBtn) settingsJellyfinTestBtn.classList.toggle('hidden', !jellyfinConfigured);
@@ -355,6 +357,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindIfPresent('view-btn-grid', 'click', () => setView('grid'));
   bindIfPresent('view-btn-list', 'click', () => setView('list'));
   bindIfPresent('btn-bulk-download', 'click', bulkDownload);
+  bindIfPresent('btn-bulk-postprocess', 'click', bulkPostprocessThemes);
   bindIfPresent('btn-bulk-clear', 'click', deselectAll);
   bindIfPresent('settings-test-plex-btn', 'click', settingsTestPlex);
   bindIfPresent('settings-test-jellyfin-btn', 'click', settingsTestJellyfin);
@@ -660,9 +663,16 @@ async function selectLibrary(provider, id, title) {
   if (themerrdbCheck) themerrdbCheck.checked = false;
   updateFilterButtonState();
   const bulkBtn = document.getElementById('btn-bulk-download');
+  const bulkPostprocessBtn = document.getElementById('btn-bulk-postprocess');
   if (bulkBtn) {
     bulkBtn.disabled = provider !== 'plex';
     bulkBtn.textContent = provider === 'plex' ? '↓ Download Themes' : '↓ Download from Plex (Plex only)';
+  }
+  if (bulkPostprocessBtn) {
+    bulkPostprocessBtn.disabled = provider !== 'plex';
+    bulkPostprocessBtn.textContent = provider === 'plex'
+      ? '♫ Normalize + Tag'
+      : '♫ Normalize + Tag (Plex only)';
   }
 
   document.querySelectorAll('.library-nav-item').forEach((el) => el.classList.remove('active'));
@@ -1261,6 +1271,43 @@ async function executeBulkDownload(overwrite) {
     }
   } catch (err) {
     showToast('error', `Bulk download failed: ${err}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
+async function bulkPostprocessThemes() {
+  if (selectedItems.size === 0) return;
+  if (currentLibraryProvider !== 'plex') {
+    showToast('info', 'Bulk normalize/tag is only available for Plex libraries.');
+    return;
+  }
+
+  const ratingKeys = currentItems
+    .filter((item) => selectedItems.has(itemSelectionKey(item)))
+    .map((item) => item.ratingKey);
+  const btn = document.getElementById('btn-bulk-postprocess');
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Processing…';
+  try {
+    const data = await apiPost('/api/bulk/theme/postprocess', { ratingKeys });
+    if (data?.error) throw new Error(data.error);
+    const p = data.processed?.length ?? 0;
+    const sk = data.skipped?.length ?? 0;
+    const f = data.failed?.length ?? 0;
+    const n = data.no_theme?.length ?? 0;
+    showToast('success', `Bulk done: ${p} processed, ${sk} skipped, ${n} no theme, ${f} failed`);
+    if (p > 0 && currentLibraryId) {
+      const items = await fetchLibraryItems(currentLibraryProvider, currentLibraryId);
+      libraryCache.set(makeLibraryCacheKey(currentLibraryProvider, currentLibraryId), items);
+      currentItems = items;
+      updateStats(items);
+      renderItems(items);
+    }
+  } catch (err) {
+    showToast('error', `Bulk normalize/tag failed: ${err}`);
   } finally {
     btn.disabled = false;
     btn.textContent = origText;

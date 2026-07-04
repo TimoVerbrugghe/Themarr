@@ -4,11 +4,13 @@ import logging
 import subprocess
 from pathlib import Path
 
-from mutagen.id3 import APIC, ID3, ID3NoHeaderError, TALB, TCON, TDRC, TIT2
+from mutagen.id3 import APIC, ID3, ID3NoHeaderError, TALB, TCON, TDRC, TIT2, TXXX
 
 logger = logging.getLogger(__name__)
 
 LOUDNORM_TARGET_LUFS = -24
+NORMALIZED_MARKER_DESC = 'ThemarrNormalizedLUFS'
+NORMALIZED_MARKER_VALUE = str(LOUDNORM_TARGET_LUFS)
 
 
 def normalize_album_title(value):
@@ -107,10 +109,55 @@ def normalize_theme_audio(theme_path):
         return False
 
     normalized_path.replace(source_path)
+    _mark_theme_audio_normalized(source_path)
     return True
 
 
-def apply_theme_id3_tags(theme_path, metadata, artwork_bytes=None, artwork_mime=None):
+def is_theme_audio_normalized(theme_path):
+    """Return True when a theme has already been normalized by Themarr."""
+    audio_path = Path(theme_path)
+    try:
+        tags = ID3(str(audio_path))
+    except (ID3NoHeaderError, Exception):
+        return False
+
+    for frame in tags.getall('TXXX'):
+        if getattr(frame, 'desc', None) != NORMALIZED_MARKER_DESC:
+            continue
+        values = getattr(frame, 'text', None) or []
+        if NORMALIZED_MARKER_VALUE in [str(value) for value in values]:
+            return True
+    return False
+
+
+def has_theme_metadata_tags(theme_path):
+    """Return True when core theme metadata tags are already present."""
+    audio_path = Path(theme_path)
+    try:
+        tags = ID3(str(audio_path))
+    except (ID3NoHeaderError, Exception):
+        return False
+
+    return bool(tags.getall('TIT2') and tags.getall('TALB') and tags.getall('TCON'))
+
+
+def _mark_theme_audio_normalized(audio_path):
+    """Persist a marker so future bulk operations can skip re-normalization."""
+    try:
+        try:
+            tags = ID3(str(audio_path))
+        except ID3NoHeaderError:
+            tags = ID3()
+        tags.delall('TXXX:' + NORMALIZED_MARKER_DESC)
+        tags.add(TXXX(encoding=3, desc=NORMALIZED_MARKER_DESC, text=[NORMALIZED_MARKER_VALUE]))
+        tags.save(str(audio_path), v2_version=3)
+        return True
+    except Exception as exc:
+        logger.warning('Failed to mark normalized audio for %s: %s', audio_path, exc)
+        return False
+
+
+def apply_theme_id3_tags(theme_path, metadata, artwork_bytes=None, artwork_mime=None, preserve_existing=False):
     """Write ID3 tags (and optional cover art) onto a theme MP3."""
     audio_path = Path(theme_path)
     try:
@@ -119,20 +166,27 @@ def apply_theme_id3_tags(theme_path, metadata, artwork_bytes=None, artwork_mime=
         except ID3NoHeaderError:
             tags = ID3()
 
-        tags.delall('TIT2')
-        tags.delall('TALB')
-        tags.delall('TCON')
-        tags.delall('TDRC')
-        tags.delall('APIC')
-
-        tags.add(TIT2(encoding=3, text=metadata.get('title') or 'Unknown Theme'))
-        tags.add(TALB(encoding=3, text=metadata.get('album') or 'Unknown'))
-        tags.add(TCON(encoding=3, text=metadata.get('genre') or 'Soundtrack'))
+        if preserve_existing:
+            if not tags.getall('TIT2'):
+                tags.add(TIT2(encoding=3, text=metadata.get('title') or 'Unknown Theme'))
+            if not tags.getall('TALB'):
+                tags.add(TALB(encoding=3, text=metadata.get('album') or 'Unknown'))
+            if not tags.getall('TCON'):
+                tags.add(TCON(encoding=3, text=metadata.get('genre') or 'Soundtrack'))
+        else:
+            tags.delall('TIT2')
+            tags.delall('TALB')
+            tags.delall('TCON')
+            tags.delall('TDRC')
+            tags.delall('APIC')
+            tags.add(TIT2(encoding=3, text=metadata.get('title') or 'Unknown Theme'))
+            tags.add(TALB(encoding=3, text=metadata.get('album') or 'Unknown'))
+            tags.add(TCON(encoding=3, text=metadata.get('genre') or 'Soundtrack'))
         year = metadata.get('year')
-        if year:
+        if year and (not preserve_existing or not tags.getall('TDRC')):
             tags.add(TDRC(encoding=3, text=year))
 
-        if artwork_bytes:
+        if artwork_bytes and (not preserve_existing or not tags.getall('APIC')):
             tags.add(APIC(
                 encoding=3,
                 mime=(artwork_mime or 'image/jpeg'),

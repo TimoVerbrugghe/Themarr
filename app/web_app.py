@@ -83,7 +83,7 @@ from app.webhook_handlers import (
     check_webhook_server_uuid, process_plex_library_new, process_jellyfin_item_added,
     _is_jellyfin_item_added_event, _jellyfin_webhook_event_name, _extract_jellyfin_item_id,
 )
-from app.bulk_operations import bulk_download_themes
+from app.bulk_operations import bulk_download_themes, bulk_postprocess_themes
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -1559,6 +1559,12 @@ def delete_provider_theme(provider, item_id):
 def bulk_download_themes_route():
     """Route handler for bulk theme download."""
     return bulk_download_themes()
+
+
+@app.route('/api/bulk/theme/postprocess', methods=['POST'])
+def bulk_postprocess_themes_route():
+    """Route handler for bulk theme normalization and metadata tagging."""
+    return bulk_postprocess_themes()
 
 
 # ============================================================

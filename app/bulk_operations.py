@@ -11,7 +11,10 @@ from app.notifications import send_pushover_notification, TRIGGER_UI
 from app.theme_state import has_nonempty_theme_file
 from app.cache import sync_cached_item
 from app.cache import fetch_poster_bytes
-from app.theme_audio import apply_theme_id3_tags, build_theme_metadata, normalize_theme_audio
+from app.theme_audio import (
+    apply_theme_id3_tags, build_theme_metadata, normalize_theme_audio,
+    has_theme_metadata_tags, is_theme_audio_normalized,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,5 +102,94 @@ def bulk_download_themes():
             message=msg,
             trigger=TRIGGER_UI,
         )
+
+    return jsonify(results)
+
+
+def bulk_postprocess_themes():
+    """Normalize and tag existing local themes for multiple Plex items."""
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data.get('ratingKeys'), list):
+        return jsonify({'error': 'ratingKeys (list) is required'}), 400
+
+    rating_keys = data['ratingKeys']
+    if not rating_keys:
+        return jsonify({'error': 'ratingKeys list is empty'}), 400
+    if len(rating_keys) > MAX_BULK_ITEMS:
+        return jsonify({'error': f'Maximum {MAX_BULK_ITEMS} items per bulk operation'}), 400
+
+    try:
+        plex = get_plex()
+    except Exception as exc:
+        return error_response('Failed to connect to Plex', exc=exc)
+
+    results = {'processed': [], 'skipped': [], 'no_theme': [], 'failed': []}
+
+    for rating_key in rating_keys:
+        try:
+            item = plex.fetchItem(int(rating_key))
+            local_path = get_validated_plex_local_path(item)
+            if not local_path:
+                results['failed'].append({
+                    'ratingKey': rating_key,
+                    'title': getattr(item, 'title', '?'),
+                    'error': 'Cannot determine local path',
+                })
+                continue
+
+            theme_path = _theme_file_path(local_path)
+            if not has_nonempty_theme_file(local_path):
+                results['no_theme'].append({'ratingKey': rating_key, 'title': item.title})
+                continue
+
+            already_normalized = is_theme_audio_normalized(theme_path)
+            already_tagged = has_theme_metadata_tags(theme_path)
+            normalized = False
+            tagged = False
+
+            if not already_normalized:
+                normalized = normalize_theme_audio(theme_path)
+
+            if not already_tagged:
+                metadata = build_theme_metadata('plex', item, item.title)
+                artwork_bytes = None
+                artwork_mime = None
+                try:
+                    if getattr(item, 'thumb', None):
+                        artwork_bytes, artwork_mime = fetch_poster_bytes(plex, item.thumb, timeout=10)
+                except Exception as exc:
+                    logger.info('Bulk post-process: artwork fetch failed for %s: %s', item.title, exc)
+                tagged = apply_theme_id3_tags(
+                    theme_path,
+                    metadata,
+                    artwork_bytes=artwork_bytes,
+                    artwork_mime=artwork_mime,
+                    preserve_existing=True,
+                )
+
+            if normalized or tagged:
+                results['processed'].append({
+                    'ratingKey': rating_key,
+                    'title': item.title,
+                    'normalized': normalized,
+                    'tagged': tagged,
+                })
+                sync_cached_item(item)
+                refresh_plex_item_metadata(item)
+                logger.info('Bulk post-process: updated theme for %s', item.title)
+            else:
+                reasons = []
+                if already_normalized:
+                    reasons.append('already_normalized')
+                if already_tagged:
+                    reasons.append('already_tagged')
+                results['skipped'].append({
+                    'ratingKey': rating_key,
+                    'title': item.title,
+                    'reason': ','.join(reasons) or 'no_changes_needed',
+                })
+
+        except Exception as exc:
+            results['failed'].append({'ratingKey': rating_key, 'error': str(exc)})
 
     return jsonify(results)
