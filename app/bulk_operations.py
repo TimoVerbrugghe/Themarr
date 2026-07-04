@@ -300,10 +300,16 @@ def _bulk_postprocess_jellyfin(item_id, results):
     jellyfin, _, item = get_jellyfin_item(item_id)
     raw_id = item.get('Id') or ''
     try:
-        # Validate UUID format and reconstruct — breaks taint chain from user-supplied item_id
+        # Parse and reconstruct the UUID — uuid.UUID() validates the format strictly,
+        # and str() of the resulting object creates a new canonical string that CodeQL
+        # recognizes as sanitized input, breaking the taint chain from user-supplied item_id.
         item_key = str(uuid.UUID(raw_id))
     except ValueError:
-        logger.warning('Bulk post-process: Jellyfin item %s returned without a valid Id', item_id)
+        logger.warning(
+            'Bulk post-process: Jellyfin item %s returned %s Id',
+            item_id,
+            'without an' if not raw_id else 'with an invalid',
+        )
         raise ValueError('Jellyfin item returned without a valid Id')
     title = item.get('Name') or 'Unknown'
 
