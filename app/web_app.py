@@ -226,13 +226,15 @@ def _fetch_theme_artwork(provider, client, item, item_id):
             response.raise_for_status()
             return response.content, response.headers.get('content-type', 'image/jpeg')
     except Exception as exc:
-        logger.info('Skipping artwork embedding for %s item %s: %s', provider, item_id, exc)
+        logger.info('Skipping artwork embedding for theme item')
     return None, None
 
 
 def _postprocess_theme_audio(theme_path, provider, item, item_id, title_fallback, client):
     """Normalize audio and inject ID3 tags for a saved theme file."""
-    normalize_theme_audio(theme_path)
+    normalized = normalize_theme_audio(theme_path)
+    if not normalized:
+        logger.info('Theme normalization skipped or failed for theme item')
     metadata = build_theme_metadata(provider, item, title_fallback)
     artwork_bytes, artwork_mime = _fetch_theme_artwork(provider, client, item, item_id)
     apply_theme_id3_tags(theme_path, metadata, artwork_bytes=artwork_bytes, artwork_mime=artwork_mime)

@@ -1,7 +1,6 @@
 """Audio post-processing helpers for theme.mp3 files."""
 
 import logging
-import re
 import subprocess
 from pathlib import Path
 
@@ -10,7 +9,6 @@ from mutagen.id3 import APIC, ID3, ID3NoHeaderError, TALB, TCON, TDRC, TIT2
 logger = logging.getLogger(__name__)
 
 LOUDNORM_TARGET_LUFS = -24
-_YEAR_SUFFIX_PATTERN = re.compile(r'\s*\((?:19|20)\d{2}\)\s*$')
 
 
 def normalize_album_title(value):
@@ -18,7 +16,19 @@ def normalize_album_title(value):
     title = str(value or '').strip()
     if not title:
         return 'Unknown'
-    return _YEAR_SUFFIX_PATTERN.sub('', title).strip() or title
+    if not title.endswith(')'):
+        return title
+    open_paren = title.rfind('(')
+    if open_paren <= 0:
+        return title
+    if title[open_paren - 1] != ' ':
+        return title
+    year = title[open_paren + 1:-1]
+    if len(year) == 4 and year.isdigit() and year[:2] in {'19', '20'}:
+        normalized = title[:open_paren - 1].strip()
+        if normalized:
+            return normalized
+    return title
 
 
 def extract_genre(provider, item):
@@ -62,7 +72,7 @@ def build_theme_metadata(provider, item, title_fallback):
 def normalize_theme_audio(theme_path):
     """Normalize a theme MP3 to broadcast loudness (target -24 LUFS)."""
     source_path = Path(theme_path)
-    normalized_path = source_path.with_suffix('.normalized.mp3')
+    normalized_path = source_path.with_name(f'{source_path.stem}.normalized.mp3')
     command = [
         'ffmpeg',
         '-y',
@@ -82,9 +92,13 @@ def normalize_theme_audio(theme_path):
     ]
 
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
     except OSError as exc:
         logger.warning('Audio normalization skipped for %s: %s', source_path, exc)
+        normalized_path.unlink(missing_ok=True)
+        return False
+    except subprocess.TimeoutExpired:
+        logger.warning('Audio normalization timed out for %s', source_path)
         normalized_path.unlink(missing_ok=True)
         return False
     if result.returncode != 0:
