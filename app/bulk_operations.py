@@ -10,6 +10,8 @@ from app.errors import error_response
 from app.notifications import send_pushover_notification, TRIGGER_UI
 from app.theme_state import has_nonempty_theme_file
 from app.cache import sync_cached_item
+from app.cache import fetch_poster_bytes
+from app.theme_audio import apply_theme_id3_tags, build_theme_metadata, normalize_theme_audio
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,16 @@ def bulk_download_themes():
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         fh.write(chunk)
+            normalize_theme_audio(theme_path)
+            metadata = build_theme_metadata('plex', item, item.title)
+            artwork_bytes = None
+            artwork_mime = None
+            try:
+                if getattr(item, 'thumb', None):
+                    artwork_bytes, artwork_mime = fetch_poster_bytes(plex, item.thumb, timeout=10)
+            except Exception as exc:
+                logger.info('Bulk: artwork fetch failed for %s: %s', item.title, exc)
+            apply_theme_id3_tags(theme_path, metadata, artwork_bytes=artwork_bytes, artwork_mime=artwork_mime)
 
             results['success'].append({'ratingKey': rating_key, 'title': item.title})
             sync_cached_item(item)

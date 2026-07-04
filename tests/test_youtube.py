@@ -81,6 +81,7 @@ class TestThemeYoutube:
         fake_mp3.write_bytes(b'youtube_audio')
 
         with patch('app.web_app.download_youtube_theme_mp3', return_value=fake_mp3) as mock_download, \
+             patch('app.web_app._postprocess_theme_audio') as mock_postprocess, \
              patch('tempfile.TemporaryDirectory') as mock_tmpdir:
             mock_tmpdir.return_value.__enter__ = lambda s: str(fake_tmpdir)
             mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
@@ -101,6 +102,9 @@ class TestThemeYoutube:
             start_seconds=10,
             end_seconds=75,
         )
+        postprocess_kwargs = mock_postprocess.call_args.kwargs
+        assert postprocess_kwargs['provider'] == 'plex'
+        assert postprocess_kwargs['item_id'] == '1'
 
     def test_download_youtube_theme_reports_match_filter_reason_when_no_mp3(self, monkeypatch, tmp_path):
         from app.youtube_utils import download_youtube_theme_mp3
