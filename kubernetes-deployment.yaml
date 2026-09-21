@@ -17,6 +17,10 @@ metadata:
 data:
   # Update these values to match your environment
   PLEX_URL: "http://plex.example.com:32400"
+  # Jellyfin server URL (leave PLEX_URL/JELLYFIN_URL blank to disable a provider)
+  JELLYFIN_URL: "http://jellyfin.example.com:8096"
+  # Optional: force a specific Jellyfin user id; defaults to first user if unset
+  # JELLYFIN_USER_ID: ""
   DEFAULT_THEME: "dark"
   DEFAULT_VIEW: "list"
   # Optional: Pushover notification settings (leave empty to disable)
@@ -32,6 +36,8 @@ metadata:
 type: Opaque
 stringData:
   PLEX_TOKEN: "your-plex-token-here"
+  # Jellyfin API key (create one under Jellyfin Dashboard -> API Keys)
+  JELLYFIN_API_KEY: "your-jellyfin-api-key-here"
   # Optional: webhook authentication credentials
   # WEBHOOK_USERNAME: "webhookuser"
   # WEBHOOK_PASSWORD: "webhookpass"
@@ -96,6 +102,11 @@ spec:
             secretKeyRef:
               name: themarr-plex-secret
               key: PLEX_TOKEN
+        - name: JELLYFIN_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: themarr-plex-secret
+              key: JELLYFIN_API_KEY
         - name: FLASK_DEBUG
           value: "false"
 
@@ -238,7 +249,11 @@ spec:
     ports:
     - protocol: UDP
       port: 53
-  # Allow external HTTPS (for Plex communication)
+  # Allow external HTTPS (for Plex/Jellyfin communication)
+  # NOTE: `podSelector: {}` only matches pods inside this namespace. If your
+  # Plex/Jellyfin server runs outside the cluster (the common case), replace
+  # this `to` selector with an `ipBlock` covering its address, or this rule
+  # will silently block all traffic to it even though the port is allowed.
   - to:
     - podSelector: {}
     ports:
@@ -246,7 +261,11 @@ spec:
       port: 443
     - protocol: TCP
       port: 32400  # Plex default port
-  # Allow internal Plex communication
+    - protocol: TCP
+      port: 8096  # Jellyfin default port (HTTP)
+    - protocol: TCP
+      port: 8920  # Jellyfin default port (HTTPS)
+  # Allow internal Plex/Jellyfin communication
   - to:
     - podSelector: {}
     ports:
