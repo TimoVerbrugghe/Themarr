@@ -17,6 +17,10 @@ metadata:
 data:
   # Update these values to match your environment
   PLEX_URL: "http://plex.example.com:32400"
+  # Jellyfin server URL (leave PLEX_URL/JELLYFIN_URL blank to disable a provider)
+  JELLYFIN_URL: "http://jellyfin.example.com:8096"
+  # Optional: force a specific Jellyfin user id; defaults to first user if unset
+  # JELLYFIN_USER_ID: ""
   DEFAULT_THEME: "dark"
   DEFAULT_VIEW: "list"
   # Optional: Pushover notification settings (leave empty to disable)
@@ -27,11 +31,13 @@ data:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: themarr-plex-secret
+  name: themarr-secrets
   namespace: themarr
 type: Opaque
 stringData:
   PLEX_TOKEN: "your-plex-token-here"
+  # Jellyfin API key (create one under Jellyfin Dashboard -> API Keys)
+  JELLYFIN_API_KEY: "your-jellyfin-api-key-here"
   # Optional: webhook authentication credentials
   # WEBHOOK_USERNAME: "webhookuser"
   # WEBHOOK_PASSWORD: "webhookpass"
@@ -94,8 +100,13 @@ spec:
         - name: PLEX_TOKEN
           valueFrom:
             secretKeyRef:
-              name: themarr-plex-secret
+              name: themarr-secrets
               key: PLEX_TOKEN
+        - name: JELLYFIN_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: themarr-secrets
+              key: JELLYFIN_API_KEY
         - name: FLASK_DEBUG
           value: "false"
 
@@ -206,49 +217,3 @@ spec:
     port: 80
     targetPort: web
     protocol: TCP
-
----
-# Optional: NetworkPolicy to restrict pod traffic
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: themarr-network-policy
-  namespace: themarr
-spec:
-  podSelector:
-    matchLabels:
-      app: themarr
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          name: ingress-nginx
-    ports:
-    - protocol: TCP
-      port: 8080
-  egress:
-  # Allow DNS
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          name: kube-system
-    ports:
-    - protocol: UDP
-      port: 53
-  # Allow external HTTPS (for Plex communication)
-  - to:
-    - podSelector: {}
-    ports:
-    - protocol: TCP
-      port: 443
-    - protocol: TCP
-      port: 32400  # Plex default port
-  # Allow internal Plex communication
-  - to:
-    - podSelector: {}
-    ports:
-    - protocol: TCP
-      port: 8080

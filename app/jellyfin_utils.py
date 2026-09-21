@@ -58,10 +58,23 @@ def _normalize_provider(provider):
     return normalized
 
 
+def _jellyfin_auth_headers(jellyfin, extra_headers=None):
+    """Build Jellyfin auth headers for an API key.
+
+    Jellyfin requires the standard ``Authorization: MediaBrowser
+    Token="..."`` scheme for API-key authentication.
+    """
+    headers = dict(extra_headers or {})
+    headers['Authorization'] = (
+        'MediaBrowser Client="Themarr", Device="Themarr", '
+        f'DeviceId="themarr", Version="1.0.0", Token="{jellyfin["api_key"]}"'
+    )
+    return headers
+
+
 def jellyfin_session_get(jellyfin, path, **kwargs):
     """Perform an authenticated GET against Jellyfin."""
-    headers = dict(kwargs.pop('headers', {}) or {})
-    headers['X-Emby-Token'] = jellyfin['api_key']
+    headers = _jellyfin_auth_headers(jellyfin, kwargs.pop('headers', None))
     url = f"{jellyfin['url']}{path}"
     kwargs.setdefault('timeout', JELLYFIN_TIMEOUT_SECONDS)
     return http_requests.get(url, headers=headers, **kwargs)
@@ -69,8 +82,7 @@ def jellyfin_session_get(jellyfin, path, **kwargs):
 
 def jellyfin_session_post(jellyfin, path, **kwargs):
     """Perform an authenticated POST against Jellyfin."""
-    headers = dict(kwargs.pop('headers', {}) or {})
-    headers['X-Emby-Token'] = jellyfin['api_key']
+    headers = _jellyfin_auth_headers(jellyfin, kwargs.pop('headers', None))
     url = f"{jellyfin['url']}{path}"
     kwargs.setdefault('timeout', JELLYFIN_TIMEOUT_SECONDS)
     return http_requests.post(url, headers=headers, **kwargs)
