@@ -5,12 +5,15 @@ on:
     # Restrict to the three events Dependabot actually emits; avoids firing on
     # labeled/closed/edited events which are irrelevant and widen attack surface.
     types: [opened, synchronize, reopened]
+  workflow_run:
+    workflows: ["Run tests"]
+    types: [completed]
 
 permissions: {}
 
 jobs:
-  dependabot-auto-merge:
-    name: Auto-merge Dependabot PRs
+  approve-dependabot:
+    name: Approve Dependabot PRs
     runs-on: ubuntu-latest
     # Double guard: reserved [bot] identity + branch-name prefix check.
     # startsWith on head_ref adds defense-in-depth against hypothetical
@@ -19,13 +22,42 @@ jobs:
       github.actor == 'dependabot[bot]' &&
       startsWith(github.head_ref, 'dependabot/')
     permissions:
+      pull-requests: write
+    steps:
+      - name: Approve Dependabot updates
+        run: gh pr review --approve "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  merge-dependabot:
+    name: Merge Dependabot PRs
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+    permissions:
       contents: write
       pull-requests: write
     steps:
-      - name: Approve and auto-merge Dependabot updates
+      - name: Merge tested Dependabot update
         run: |
-          gh pr review --approve "$PR_URL"
-          gh pr merge --auto --squash "$PR_URL"
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No pull request associated with this workflow run; skipping."
+            exit 0
+          fi
+
+          current_head="$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)"
+          if [ "$current_head" != "$HEAD_SHA" ]; then
+            echo "Pull request head changed since this test run; skipping."
+            exit 0
+          fi
+
+          gh pr merge "$PR_NUMBER" --squash --delete-branch --match-head-commit "$HEAD_SHA"
         env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
