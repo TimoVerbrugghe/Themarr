@@ -31,7 +31,7 @@ data:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: themarr-plex-secret
+  name: themarr-secrets
   namespace: themarr
 type: Opaque
 stringData:
@@ -100,12 +100,12 @@ spec:
         - name: PLEX_TOKEN
           valueFrom:
             secretKeyRef:
-              name: themarr-plex-secret
+              name: themarr-secrets
               key: PLEX_TOKEN
         - name: JELLYFIN_API_KEY
           valueFrom:
             secretKeyRef:
-              name: themarr-plex-secret
+              name: themarr-secrets
               key: JELLYFIN_API_KEY
         - name: FLASK_DEBUG
           value: "false"
@@ -217,57 +217,3 @@ spec:
     port: 80
     targetPort: web
     protocol: TCP
-
----
-# Optional: NetworkPolicy to restrict pod traffic
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: themarr-network-policy
-  namespace: themarr
-spec:
-  podSelector:
-    matchLabels:
-      app: themarr
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          name: ingress-nginx
-    ports:
-    - protocol: TCP
-      port: 8080
-  egress:
-  # Allow DNS
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          name: kube-system
-    ports:
-    - protocol: UDP
-      port: 53
-  # Allow external HTTPS (for Plex/Jellyfin communication)
-  # NOTE: `podSelector: {}` only matches pods inside this namespace. If your
-  # Plex/Jellyfin server runs outside the cluster (the common case), replace
-  # this `to` selector with an `ipBlock` covering its address, or this rule
-  # will silently block all traffic to it even though the port is allowed.
-  - to:
-    - podSelector: {}
-    ports:
-    - protocol: TCP
-      port: 443
-    - protocol: TCP
-      port: 32400  # Plex default port
-    - protocol: TCP
-      port: 8096  # Jellyfin default port (HTTP)
-    - protocol: TCP
-      port: 8920  # Jellyfin default port (HTTPS)
-  # Allow internal Plex/Jellyfin communication
-  - to:
-    - podSelector: {}
-    ports:
-    - protocol: TCP
-      port: 8080

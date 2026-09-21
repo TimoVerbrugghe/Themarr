@@ -61,14 +61,10 @@ def _normalize_provider(provider):
 def _jellyfin_auth_headers(jellyfin, extra_headers=None):
     """Build Jellyfin auth headers for an API key.
 
-    Jellyfin 12.x (formerly 10.11.x) rejects the legacy ``X-Emby-Token``
-    header for API-key authentication and requires the standard
-    ``Authorization: MediaBrowser Token="..."`` scheme instead. Both headers
-    are sent so that older Jellyfin servers (which only understand
-    ``X-Emby-Token``) keep working too.
+    Jellyfin requires the standard ``Authorization: MediaBrowser
+    Token="..."`` scheme for API-key authentication.
     """
     headers = dict(extra_headers or {})
-    headers['X-Emby-Token'] = jellyfin['api_key']
     headers['Authorization'] = (
         'MediaBrowser Client="Themarr", Device="Themarr", '
         f'DeviceId="themarr", Version="1.0.0", Token="{jellyfin["api_key"]}"'

@@ -8,30 +8,27 @@ JELLYFIN = {'url': 'http://jellyfin.example.com', 'api_key': 'testkey123', 'user
 
 
 class TestJellyfinAuthHeaders:
-    """Jellyfin 12.x rejects the legacy X-Emby-Token header for API-key auth
-    and requires ``Authorization: MediaBrowser Token="..."`` instead. Both
-    headers must be sent so older Jellyfin servers keep working too.
+    """Jellyfin requires the ``Authorization: MediaBrowser Token="..."``
+    scheme for API-key authentication.
     """
 
-    def test_session_get_sends_both_auth_headers(self):
+    def test_session_get_sends_authorization_header(self):
         with patch('app.jellyfin_utils.http_requests.get') as mock_get:
             jellyfin_session_get(JELLYFIN, '/Users')
 
         _, kwargs = mock_get.call_args
         headers = kwargs['headers']
-        assert headers['X-Emby-Token'] == 'testkey123'
-        assert 'Authorization' in headers
+        assert 'X-Emby-Token' not in headers
         assert 'MediaBrowser' in headers['Authorization']
         assert 'Token="testkey123"' in headers['Authorization']
 
-    def test_session_post_sends_both_auth_headers(self):
+    def test_session_post_sends_authorization_header(self):
         with patch('app.jellyfin_utils.http_requests.post') as mock_post:
             jellyfin_session_post(JELLYFIN, '/Items')
 
         _, kwargs = mock_post.call_args
         headers = kwargs['headers']
-        assert headers['X-Emby-Token'] == 'testkey123'
-        assert 'Authorization' in headers
+        assert 'X-Emby-Token' not in headers
         assert 'Token="testkey123"' in headers['Authorization']
 
     def test_session_get_preserves_caller_supplied_headers(self):
@@ -41,7 +38,6 @@ class TestJellyfinAuthHeaders:
         _, kwargs = mock_get.call_args
         headers = kwargs['headers']
         assert headers['Accept'] == 'application/json'
-        assert headers['X-Emby-Token'] == 'testkey123'
         assert 'Authorization' in headers
 
     def test_session_get_uses_full_url_and_timeout(self):
