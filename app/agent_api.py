@@ -76,7 +76,7 @@ def create_agent_api(*, load_items, get_context, download_handlers):
             if len(query) > 200:
                 raise ValueError('Search query is too long')
         except ValueError as exc:
-            return error_response(str(exc), status_code=400)
+            return error_response('Invalid library identifier or discovery filters', status_code=400, exc=exc)
 
         try:
             snapshot = load_items(provider, library_id)
@@ -108,7 +108,7 @@ def create_agent_api(*, load_items, get_context, download_handlers):
         try:
             validate_identifier(provider, item_id)
         except ValueError as exc:
-            return error_response(str(exc), status_code=400)
+            return error_response('Invalid provider or item identifier', status_code=400, exc=exc)
         try:
             context = get_context(provider, item_id)
             local_exists = has_nonempty_theme_file(context['local_path'])
@@ -165,7 +165,7 @@ def create_agent_api(*, load_items, get_context, download_handlers):
             elif any(key in data for key in ('url', 'start_time', 'end_time')):
                 raise ValueError('url and trim times are only supported for the YouTube source')
         except (ValueError, TypeError) as exc:
-            return error_response(str(exc), status_code=400)
+            return error_response('Invalid theme download parameters', status_code=400, exc=exc)
         return download_handlers[source](provider, item_id)
 
     return blueprint

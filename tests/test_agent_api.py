@@ -116,6 +116,17 @@ class TestAgentOptions:
 
 
 class TestAgentDownload:
+    def test_should_not_expose_validation_exception_details(self, client):
+        with patch(
+            'app.agent_api.normalize_youtube_trim_window',
+            side_effect=ValueError('private internal validation details'),
+        ):
+            response = client.post(PREFIX + '/items/plex/1/download', json={
+                'source': 'youtube', 'url': 'https://youtu.be/abc', 'start_time': '10',
+            })
+        assert response.status_code == 400
+        assert response.json == {'error': 'Invalid theme download parameters'}
+
     @pytest.mark.parametrize('body', [
         [], None, {'source': []}, {'source': 'unknown'},
         {'source': 'youtube', 'url': 'https://untrusted.example'},
