@@ -51,7 +51,7 @@ from app.jellyfin_utils import (
     refresh_jellyfin_item_metadata, find_jellyfin_item_id_by_path,
 )
 from app.auth import (
-    _log_generated_api_key_warning, _auth_disabled, _get_ui_credentials,
+    _auth_disabled, _get_ui_credentials,
     _credentials_auth_configured, _ui_auth_misconfigured, _ui_auth_warning_message,
     _get_auth_mode, _parse_api_key, _get_api_key, _check_api_request_auth,
     _check_webhook_basic_auth, _get_settings_env_values,
@@ -84,6 +84,7 @@ from app.webhook_handlers import (
     _is_jellyfin_item_added_event, _jellyfin_webhook_event_name, _extract_jellyfin_item_id,
 )
 from app.bulk_operations import bulk_download_themes, bulk_postprocess_themes
+from app.agent_api import create_agent_api
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -111,7 +112,6 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = (os.getenv('FLASK_DEBUG', 'false').lower() not in {'true', '1', 'yes'})
 
-_generated_api_key = secrets.token_urlsafe(32)
 _SETTINGS_ENV_VARS = (
     'PLEX_URL',
     'PLEX_TOKEN',
@@ -137,9 +137,8 @@ _SETTINGS_ENV_VARS = (
 )
 
 
-# API_KEY initialization logging
-if not (os.getenv('API_KEY') or '').strip():
-    _log_generated_api_key_warning()
+if not _get_api_key():
+    logger.info('API_KEY is not configured; programmatic API and MCP access are disabled.')
 
 
 # Log the active auth mode at startup.
@@ -453,16 +452,15 @@ def get_settings_runtime():
     The actual API key is returned so the settings page can display it; it is
     safe to do so because the caller is already authenticated.
     """
-    actual_key, is_generated = _get_api_key(_generated_api_key)
+    actual_key = _get_api_key()
     return jsonify({
         'api_key': actual_key,
-        'api_key_configured': not is_generated,
-        'api_key_generated': is_generated,
+        'api_key_configured': bool(actual_key),
         'background_worker_count': BACKGROUND_WORKER_COUNT,
         'library_page_size': LIBRARY_PAGE_SIZE,
         'library_page_size_max': LIBRARY_PAGE_SIZE_MAX_VALUE,
         'poster_cache_max_items': POSTER_CACHE_MAX_ITEMS,
-        'env_values': _get_settings_env_values(actual_key if is_generated else None),
+        'env_values': _get_settings_env_values(),
     })
 
 
@@ -502,7 +500,7 @@ def enforce_api_auth():
     if request.path in {'/api/webhooks/plex', '/api/webhooks/jellyfin'}:
         return None  # Webhook uses its own Basic Auth
     # Require auth for ALL API routes (both read and mutating)
-    return _check_api_request_auth(_generated_api_key)
+    return _check_api_request_auth()
 
 
 @app.route('/api/status')
@@ -643,21 +641,28 @@ def get_cache_status():
 @app.route('/api/libraries/<int:section_id>/items')
 def get_library_items(section_id):
     """Return all items in a library section, served from cache when available."""
-    cached = get_library_cache_for_section(section_id)
-    if cached is not None:
-        return jsonify(_paginate_items(cached))
+    try:
+        return jsonify(_paginate_items(load_library_items('plex', section_id)))
+    except Exception as exc:
+        return error_response(f'Failed to get items for section {section_id}', exc=exc)
 
-    section_lock = get_section_build_lock(section_id)
-    with section_lock:
-        cached = get_library_cache_for_section(section_id)
+
+def load_library_items(provider, section_id):
+    """Load a complete library snapshot using the shared cache and build lock."""
+    provider = _normalize_provider(provider)
+    cache_key = int(section_id) if provider == 'plex' else f'jellyfin:{section_id}'
+    cached = get_library_cache_for_section(cache_key)
+    if cached is not None:
+        return cached
+    with get_section_build_lock(cache_key):
+        cached = get_library_cache_for_section(cache_key)
         if cached is not None:
-            return jsonify(_paginate_items(cached))
-        try:
-            result = build_library_items(section_id, provider='plex')
-            set_library_cache_for_section(section_id, result)
-            return jsonify(_paginate_items(result))
-        except Exception as exc:
-            return error_response(f'Failed to get items for section {section_id}', exc=exc)
+            return cached
+        result = build_library_items(
+            int(section_id) if provider == 'plex' else section_id, provider=provider,
+        )
+        set_library_cache_for_section(cache_key, result)
+        return result
 
 
 @app.route('/api/libraries/<provider>/<path:section_id>/items')
@@ -675,22 +680,10 @@ def get_library_items_by_provider(provider, section_id):
             return error_response('Plex library id must be an integer', status_code=400, exc=exc)
         return get_library_items(plex_section_id)
 
-    cache_key = f'jellyfin:{section_id}'
-    cached = get_library_cache_for_section(cache_key)
-    if cached is not None:
-        return jsonify(_paginate_items(cached))
-
-    section_lock = get_section_build_lock(cache_key)
-    with section_lock:
-        cached = get_library_cache_for_section(cache_key)
-        if cached is not None:
-            return jsonify(_paginate_items(cached))
-        try:
-            result = build_library_items(section_id, provider='jellyfin')
-            set_library_cache_for_section(cache_key, result)
-            return jsonify(_paginate_items(result))
-        except Exception as exc:
-            return error_response(f'Failed to get items for {provider} section {section_id}', exc=exc)
+    try:
+        return jsonify(_paginate_items(load_library_items(provider, section_id)))
+    except Exception as exc:
+        return error_response(f'Failed to get items for {provider} section {section_id}', exc=exc)
 
 
 @app.route('/api/poster/<int:rating_key>')
@@ -1554,6 +1547,17 @@ def delete_provider_theme(provider, item_id):
 # ============================================================
 # Bulk operations
 # ============================================================
+
+app.register_blueprint(create_agent_api(
+    load_items=load_library_items,
+    get_context=_get_item_context,
+    download_handlers={
+        'plex': download_provider_theme,
+        'themerrdb': download_provider_from_themerrdb,
+        'youtube': download_provider_from_youtube,
+    },
+))
+
 
 @app.route('/api/bulk/theme/download', methods=['POST'])
 def bulk_download_themes_route():

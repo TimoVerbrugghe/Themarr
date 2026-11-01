@@ -41,30 +41,23 @@ class TestAuthLogout:
 
 
 class TestSettingsRuntime:
-    def test_generated_api_key_warning_does_not_log_secret(self):
-        from app import web_app, auth
-        with patch.object(auth.logger, 'warning') as mock_warning:
-            web_app._log_generated_api_key_warning()
-
-        mock_warning.assert_called_once_with(
-            'API_KEY is not set; a one-time startup API key was generated. '
-            'Open the Settings page in the web app after signing in to view it, '
-            'or set API_KEY to a stable value to avoid rotation on restart.',
-        )
-
     def test_runtime_settings_requires_authentication(self, app):
         unauthenticated_client = app.test_client()
         resp = unauthenticated_client.get('/api/settings/runtime')
         assert resp.status_code == 401
 
-    def test_runtime_settings_returns_generated_key_when_env_missing(self, client):
+    def test_runtime_settings_reports_disabled_automation_when_env_missing(self, client):
+        client.environ_base.pop('HTTP_X_THEMARR_API_KEY')
+        with client.session_transaction() as session:
+            session['authenticated'] = True
         with patch.dict(os.environ, {'API_KEY': ''}, clear=False):
             resp = client.get('/api/settings/runtime')
         assert resp.status_code == 200
         data = resp.get_json()
         assert 'api_key' in data
         assert data['api_key_configured'] is False
-        assert data['api_key_generated'] is True
+        assert data['api_key'] == ''
+        assert 'api_key_generated' not in data
         assert data['background_worker_count'] == 4
         assert data['library_page_size'] == 200
         assert data['library_page_size_max'] == 500
@@ -78,7 +71,7 @@ class TestSettingsRuntime:
         data = resp.get_json()
         assert data['api_key'] == 'configured-key'
         assert data['api_key_configured'] is True
-        assert data['api_key_generated'] is False
+        assert 'api_key_generated' not in data
 
     def test_runtime_settings_includes_current_environment_values(self, app):
         with patch.dict(
@@ -147,18 +140,40 @@ class TestSettingsRuntime:
         env_values = resp.get_json()['env_values']
         assert env_values['JELLYFIN_USER_ID'] == 'first user'
 
-    def test_runtime_settings_api_key_current_uses_generated_value_when_unset(self, client):
+    def test_runtime_settings_api_key_current_reports_disabled_when_unset(self, client):
+        client.environ_base.pop('HTTP_X_THEMARR_API_KEY')
+        with client.session_transaction() as session:
+            session['authenticated'] = True
         with patch.dict(os.environ, {'API_KEY': ''}, clear=False):
             resp = client.get('/api/settings/runtime')
 
         assert resp.status_code == 200
         data = resp.get_json()
         env_values = data['env_values']
-        assert data['api_key_generated'] is True
-        assert env_values['API_KEY'] == data['api_key']
+        assert data['api_key_configured'] is False
+        assert env_values['API_KEY'] == 'disabled'
 
 
 class TestApiAuth:
+    @pytest.mark.parametrize('value', ['', '   '])
+    @pytest.mark.parametrize('disabled', ['true', 'false'])
+    def test_automation_disabled_without_configured_key(self, app, monkeypatch, value, disabled):
+        monkeypatch.setenv('API_KEY', value)
+        monkeypatch.setenv('DISABLE_AUTH', disabled)
+        with app.test_client() as client:
+            assert client.get('/api/agent/v1/capabilities').status_code == 503
+            assert client.get('/api/libraries', headers={'X-Themarr-Api-Key': 'anything'}).status_code == 503
+
+    def test_ui_session_still_works_without_api_key(self, app, monkeypatch):
+        monkeypatch.delenv('API_KEY', raising=False)
+        monkeypatch.setenv('DISABLE_AUTH', 'false')
+        monkeypatch.setenv('AUTH_USERNAME', 'admin')
+        monkeypatch.setenv('AUTH_PASSWORD', 'secret')
+        with app.test_client() as client:
+            assert client.post('/api/auth/login', json={'username': 'admin', 'password': 'secret'}).status_code == 200
+            assert client.get('/api/settings/runtime').status_code == 200
+            assert client.get('/api/agent/v1/capabilities').status_code == 503
+
     def test_mutating_endpoint_requires_api_key_when_configured(self, app):
         unauthenticated_client = app.test_client()
         with patch.dict(os.environ, {'API_KEY': 'secret-key'}):

@@ -1,7 +1,7 @@
 ---
-# Kubernetes Deployment manifest for Themarr with security hardening
-# This demonstrates how to deploy Themarr with proper securityContext,
-# resource limits, and other security best practices.
+# Kubernetes example using existing media PVCs and secret references.
+# Change namespace, image tag, provider URLs, PVC names and ingress settings.
+# For an existing deployment, merge changes rather than applying this whole file.
 
 apiVersion: v1
 kind: Namespace
@@ -23,24 +23,16 @@ data:
   # JELLYFIN_USER_ID: ""
   DEFAULT_THEME: "dark"
   DEFAULT_VIEW: "list"
-  # Optional: Pushover notification settings (leave empty to disable)
-  # PUSHOVER_APP_TOKEN: ""
-  # PUSHOVER_USER_KEY: ""
+  DISABLE_AUTH: "false"
+  NOTIFY_ON_WEBHOOK_DOWNLOAD: "true"
+  NOTIFY_ON_WEBHOOK_FAILURE: "true"
+  NOTIFY_ON_UI_DOWNLOAD: "true"
 
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: themarr-secrets
-  namespace: themarr
-type: Opaque
-stringData:
-  PLEX_TOKEN: "your-plex-token-here"
-  # Jellyfin API key (create one under Jellyfin Dashboard -> API Keys)
-  JELLYFIN_API_KEY: "your-jellyfin-api-key-here"
-  # Optional: webhook authentication credentials
-  # WEBHOOK_USERNAME: "webhookuser"
-  # WEBHOOK_PASSWORD: "webhookpass"
+# Create themarr-secrets separately; never put real credentials in this template.
+# Required keys: API_KEY, AUTH_USERNAME, AUTH_PASSWORD.
+# Provider keys: PLEX_TOKEN and/or JELLYFIN_API_KEY.
+# Optional keys: PUSHOVER_APP_TOKEN, PUSHOVER_USER_KEY.
+# /mcp always requires API_KEY, even with DISABLE_AUTH=true behind a trusted proxy.
 
 ---
 apiVersion: apps/v1
@@ -49,34 +41,33 @@ metadata:
   name: themarr
   namespace: themarr
   labels:
-    app: themarr
-    version: v1
+    app.kubernetes.io/name: themarr
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: themarr
+      app.kubernetes.io/name: themarr
   template:
     metadata:
       labels:
-        app: themarr
-      annotations:
-        container.apparmor.security.beta.kubernetes.io/themarr: runtime/default
+        app.kubernetes.io/name: themarr
     spec:
+      automountServiceAccountToken: false
       # Pod-level security context
       securityContext:
         runAsNonRoot: true
-        runAsUser: 65534  # nobody user
-        runAsGroup: 65534
-        fsGroup: 65534
+        # Match the UID with write access to your existing media volumes.
+        runAsUser: 999
         seccompProfile:
           type: RuntimeDefault
 
       containers:
       - name: themarr
         image: ghcr.io/timoverbrugghe/themarr:latest
+        # Replace latest with a published MCP-enabled tag/digest or your own build.
+        # Keep the image's default command: uvicorn app.http_server:app.
         imagePullPolicy: Always
 
         # Container-level security context
@@ -87,8 +78,7 @@ spec:
             - ALL
           readOnlyRootFilesystem: true
           runAsNonRoot: true
-          runAsUser: 65534
-          runAsGroup: 65534
+          runAsUser: 999
 
         # Environment variables from ConfigMap
         envFrom:
@@ -102,11 +92,40 @@ spec:
             secretKeyRef:
               name: themarr-secrets
               key: PLEX_TOKEN
+              optional: true
         - name: JELLYFIN_API_KEY
           valueFrom:
             secretKeyRef:
               name: themarr-secrets
               key: JELLYFIN_API_KEY
+              optional: true
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: themarr-secrets
+              key: API_KEY
+        - name: AUTH_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: themarr-secrets
+              key: AUTH_USERNAME
+        - name: AUTH_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: themarr-secrets
+              key: AUTH_PASSWORD
+        - name: PUSHOVER_APP_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: themarr-secrets
+              key: PUSHOVER_APP_TOKEN
+              optional: true
+        - name: PUSHOVER_USER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: themarr-secrets
+              key: PUSHOVER_USER_KEY
+              optional: true
         - name: FLASK_DEBUG
           value: "false"
 
@@ -124,9 +143,9 @@ spec:
           mountPath: /run
         # Media library mounts (writable for theme.mp3 output)
         - name: tv-shows
-          mountPath: /mnt/tv
+          mountPath: /tv
         - name: movies
-          mountPath: /mnt/movies
+          mountPath: /movies
 
         # Resource requests and limits
         resources:
@@ -157,6 +176,14 @@ spec:
           timeoutSeconds: 5
           failureThreshold: 3
 
+        startupProbe:
+          httpGet:
+            path: /health
+            port: web
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+
       # Pod-level DNS configuration (optional)
       dnsPolicy: ClusterFirst
 
@@ -174,7 +201,7 @@ spec:
             podAffinityTerm:
               labelSelector:
                 matchExpressions:
-                - key: app
+                - key: app.kubernetes.io/name
                   operator: In
                   values:
                   - themarr
@@ -190,15 +217,14 @@ spec:
         emptyDir:
           medium: Memory
           sizeLimit: 64Mi
-      # Media library mounts (update these to match your storage setup)
+      # Existing PVCs must be in the same namespace as the deployment.
+      # Container paths must match the paths reported by Plex/Jellyfin.
       - name: tv-shows
-        hostPath:
-          path: /mnt/tv
-          type: Directory
+        persistentVolumeClaim:
+          claimName: tvshows-pvc
       - name: movies
-        hostPath:
-          path: /mnt/movies
-          type: Directory
+        persistentVolumeClaim:
+          claimName: movies-pvc
 
 ---
 apiVersion: v1
@@ -207,13 +233,43 @@ metadata:
   name: themarr
   namespace: themarr
   labels:
-    app: themarr
+    app.kubernetes.io/name: themarr
 spec:
   type: ClusterIP
   selector:
-    app: themarr
+    app.kubernetes.io/name: themarr
   ports:
   - name: web
-    port: 80
+    port: 8080
     targetPort: web
     protocol: TCP
+
+---
+# Optional ingress example. Replace the class, host and existing TLS secret.
+# For non-NGINX controllers, use their equivalent timeout settings.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: themarr
+  namespace: themarr
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - themarr.example.com
+    secretName: themarr-tls
+  rules:
+  - host: themarr.example.com
+    http:
+      paths:
+      # Prefix / includes the Web UI, API and API-key-protected /mcp endpoint.
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: themarr
+            port:
+              number: 8080

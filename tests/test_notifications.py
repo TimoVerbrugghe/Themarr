@@ -144,7 +144,7 @@ class TestNotificationTriggers:
 
 class TestSettingsTestPushover:
     def test_returns_400_when_not_configured(self, client):
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {'API_KEY': 'test-api-key'}, clear=True):
             resp = client.post('/api/settings/test-pushover')
         assert resp.status_code == 400
         assert 'PUSHOVER_APP_TOKEN' in resp.get_json()['error']

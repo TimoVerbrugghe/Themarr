@@ -8,15 +8,6 @@ from flask import request, session, jsonify
 logger = logging.getLogger(__name__)
 
 
-def _log_generated_api_key_warning():
-    """Warn when using an auto-generated API key without logging the secret."""
-    logger.warning(
-        'API_KEY is not set; a one-time startup API key was generated. '
-        'Open the Settings page in the web app after signing in to view it, '
-        'or set API_KEY to a stable value to avoid rotation on restart.',
-    )
-
-
 def _auth_disabled():
     """Return True when DISABLE_AUTH=true (authentication bypass mode)."""
     return (os.getenv('DISABLE_AUTH') or '').strip().lower() in {'true', '1', 'yes'}
@@ -74,31 +65,38 @@ def _parse_api_key():
     return ''
 
 
-def _get_api_key(generated_key=None):
-    """Return configured API key or generated fallback key."""
-    configured_key = (os.getenv('API_KEY') or '').strip()
-    if configured_key:
-        return configured_key, False
-    if generated_key:
-        return generated_key, True
-    return '', False
+def _get_api_key():
+    """Return only the explicitly configured API key."""
+    return (os.getenv('API_KEY') or '').strip()
 
 
-def _check_api_request_auth(generated_key=None):
+def _check_api_request_auth():
     """Validate API key auth for protected API routes.
 
     Accepts either a valid Flask session (established via POST /api/auth/login)
     or the API key supplied in the X-Themarr-Api-Key / Authorization header.
-    When DISABLE_AUTH=true, all requests are allowed without credentials.
+    Browser workflows retain session/reverse-proxy auth. Agent routes and
+    requests supplying API credentials always require a configured key.
     """
+    expected_key = _get_api_key()
+    provided_key = _parse_api_key()
+    programmatic = request.path.startswith('/api/agent/') or bool(
+        request.headers.get('Authorization') or request.headers.get('X-Themarr-Api-Key')
+    )
+    if programmatic:
+        if not expected_key:
+            logger.warning('Rejected API request: API_KEY is not configured')
+            return jsonify({'error': 'API access is disabled; configure API_KEY to enable it'}), 503
+        if provided_key and hmac.compare_digest(provided_key.encode('utf-8'), expected_key.encode('utf-8')):
+            return None
+        return jsonify({'error': 'Unauthorized API request'}), 401
     if _auth_disabled():
         return None
     if session.get('authenticated'):
         return None
-    expected_key, _ = _get_api_key(generated_key)
-    provided_key = _parse_api_key()
-    if provided_key and hmac.compare_digest(provided_key, expected_key):
-        return None
+    if not expected_key:
+        logger.warning('Rejected API request: API_KEY is not configured')
+        return jsonify({'error': 'API access is disabled; configure API_KEY to enable it'}), 503
     return jsonify({'error': 'Unauthorized API request'}), 401
 
 
@@ -125,7 +123,7 @@ def _check_webhook_basic_auth():
     return jsonify({'error': 'Invalid webhook credentials'}), 401
 
 
-def _get_settings_env_values(generated_api_key=None):
+def _get_settings_env_values():
     """Return current raw environment values shown in the Settings page."""
     settings_vars = (
         'PLEX_URL',
@@ -152,7 +150,7 @@ def _get_settings_env_values(generated_api_key=None):
     )
     defaults_when_unset = {
         'JELLYFIN_USER_ID': 'first user',
-        'API_KEY': generated_api_key or '',
+        'API_KEY': 'disabled',
         'NOTIFY_ON_WEBHOOK_DOWNLOAD': 'true',
         'NOTIFY_ON_WEBHOOK_FAILURE': 'true',
         'NOTIFY_ON_UI_DOWNLOAD': 'true',

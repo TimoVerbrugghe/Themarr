@@ -1,5 +1,7 @@
 services:
   themarr:
+    # Build the MCP-enabled image locally; /mcp shares the Web UI's port 8080.
+    # Keep the image's default command (uvicorn app.http_server:app).
     build: .
     container_name: themarr
     # Security hardening
@@ -28,12 +30,18 @@ services:
       FLASK_DEBUG: ${FLASK_DEBUG:-false}
       DEFAULT_THEME: ${DEFAULT_THEME:-dark}
       DEFAULT_VIEW: ${DEFAULT_VIEW:-list}
+      # Blank disables programmatic API and MCP access; no key is generated.
       API_KEY: ${API_KEY:-}
       AUTH_USERNAME: ${AUTH_USERNAME:-}
       AUTH_PASSWORD: ${AUTH_PASSWORD:-}
       DISABLE_AUTH: ${DISABLE_AUTH:-false}
       WEBHOOK_USERNAME: ${WEBHOOK_USERNAME:-}
       WEBHOOK_PASSWORD: ${WEBHOOK_PASSWORD:-}
+      PUSHOVER_APP_TOKEN: ${PUSHOVER_APP_TOKEN:-}
+      PUSHOVER_USER_KEY: ${PUSHOVER_USER_KEY:-}
+      NOTIFY_ON_WEBHOOK_DOWNLOAD: ${NOTIFY_ON_WEBHOOK_DOWNLOAD:-true}
+      NOTIFY_ON_WEBHOOK_FAILURE: ${NOTIFY_ON_WEBHOOK_FAILURE:-true}
+      NOTIFY_ON_UI_DOWNLOAD: ${NOTIFY_ON_UI_DOWNLOAD:-true}
     volumes:
       # Mount your media library directories at the SAME path as in your Plex/Jellyfin container.
       # Themarr uses the paths reported by Plex/Jellyfin to locate files on disk, so the

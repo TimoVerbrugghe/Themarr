@@ -217,12 +217,12 @@ async function loadSettingsRuntime() {
   try {
     const data = await apiGet('/api/settings/runtime');
     // Store API key in memory so header-based API calls keep working
-    if (data.api_key) apiKey = data.api_key;
+    apiKey = data.api_key || '';
     const keyEl = document.getElementById('runtime-api-key');
     const sourceEl = document.getElementById('runtime-api-key-source');
     if (keyEl) keyEl.value = data.api_key || 'Not configured';
     if (sourceEl) {
-      sourceEl.textContent = data.api_key_configured ? 'from API_KEY env variable' : 'auto-generated at startup';
+      sourceEl.textContent = data.api_key_configured ? 'from API_KEY env variable' : 'API and MCP access disabled; set API_KEY to enable';
     }
     populateSettingsEnvValues(data.env_values || {});
   } catch (err) {
@@ -247,7 +247,7 @@ async function refreshApiKey() {
   // (user will need to enter the API key via the settings page login form).
   try {
     const data = await apiGet('/api/settings/runtime');
-    if (data.api_key) apiKey = data.api_key;
+    apiKey = data.api_key || '';
   } catch (_) { /* not yet authenticated — ignore */ }
 }
 

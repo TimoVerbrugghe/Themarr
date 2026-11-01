@@ -11,11 +11,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 @pytest.fixture
-def app():
+def app(monkeypatch):
     """Create test Flask app."""
     from app import web_app
     from app import themerrdb_service
     from app.cache import invalidate_library_cache
+    monkeypatch.setenv('API_KEY', 'test-api-key')
     web_app.app.config['TESTING'] = True
     invalidate_library_cache()
     web_app._startup_warmup_started = True  # Prevent middleware from resetting cache on each request
@@ -30,7 +31,7 @@ def app():
 def client(app):
     """Create test client."""
     from app import web_app
-    api_key, _ = web_app._get_api_key(web_app._generated_api_key)
+    api_key = web_app._get_api_key()
     test_client = app.test_client()
     test_client.environ_base['HTTP_X_THEMARR_API_KEY'] = api_key
     return test_client
