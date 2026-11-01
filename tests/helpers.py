@@ -2,6 +2,17 @@
 from unittest.mock import MagicMock
 
 
+def make_agent_library_item(item_id, title, *, local=False, remote=False, media_type='show'):
+    """Create a serialized library item for agent discovery tests."""
+    return {
+        'id': item_id, 'provider': 'plex', 'library_id': '1',
+        'title': title, 'type': media_type, 'year': 2020, 'external_ids': {},
+        'has_local_theme': local, 'has_plex_theme': remote,
+        'has_themerrdb_theme': remote, 'theme_size': 20 if local else 0,
+        'plex_theme_source_unverified': False, 'local_path': '/private/media',
+    }
+
+
 def make_mock_show(rating_key=1, title='Test Show', year=2020, has_theme=True, location=None):
     """Create a mock Plex show item.
 

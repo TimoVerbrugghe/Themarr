@@ -23,7 +23,7 @@
       <h2 class="login-title">Web UI authentication is not configured</h2>
       <p class="text-muted">{{ ui_auth_warning_message }}</p>
       <div class="settings-action-result settings-action-result-inline success">
-        API key generation and API key-based automation remain available via <code>API_KEY</code>.
+        Set <code>API_KEY</code> to enable programmatic API and MCP access.
       </div>
     </div>
   </div>
@@ -274,7 +274,7 @@
                 <tr><td><code>AUTH_USERNAME</code></td><td class="settings-envtable-col-default">—</td><td class="settings-envtable-col-current" data-env-current="AUTH_USERNAME">Loading…</td><td>Username for credentials-based UI authentication.</td></tr>
                 <tr><td><code>AUTH_PASSWORD</code></td><td class="settings-envtable-col-default">—</td><td class="settings-envtable-col-current" data-env-current="AUTH_PASSWORD">Loading…</td><td>Password for credentials-based UI authentication.</td></tr>
                 <tr><td><code>DISABLE_AUTH</code></td><td class="settings-envtable-col-default"><code>false</code></td><td class="settings-envtable-col-current" data-env-current="DISABLE_AUTH">Loading…</td><td>Set to <code>true</code> to bypass UI login (only behind trusted reverse proxy).</td></tr>
-                <tr><td><code>API_KEY</code></td><td class="settings-envtable-col-default"><code>auto-generated</code></td><td class="settings-envtable-col-current" data-env-current="API_KEY">Loading…</td><td>API key used for mutating API routes. If unset, Themarr generates one at startup and shows it above.</td></tr>
+                <tr><td><code>API_KEY</code></td><td class="settings-envtable-col-default"><code>disabled</code></td><td class="settings-envtable-col-current" data-env-current="API_KEY">Loading…</td><td>Enables programmatic HTTP API and MCP access. If unset, automation is disabled; no key is generated.</td></tr>
                 <tr class="settings-envtable-group"><td colspan="4">Notifications (optional)</td></tr>
                 <tr><td><code>PUSHOVER_APP_TOKEN</code></td><td class="settings-envtable-col-default">—</td><td class="settings-envtable-col-current" data-env-current="PUSHOVER_APP_TOKEN">Loading…</td><td>Pushover application token. Leave blank to disable push notifications.</td></tr>
                 <tr><td><code>PUSHOVER_USER_KEY</code></td><td class="settings-envtable-col-default">—</td><td class="settings-envtable-col-current" data-env-current="PUSHOVER_USER_KEY">Loading…</td><td>Pushover user/group key. Leave blank to disable push notifications.</td></tr>

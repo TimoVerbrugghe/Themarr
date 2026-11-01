@@ -42,6 +42,7 @@ COPY --chown=themarr:themarr static/ static/
 
 EXPOSE 8080
 
+# Set API_KEY at deployment time to enable programmatic API and /mcp access.
 USER themarr
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "8", "--timeout", "120", "app.web_app:app"]
+CMD ["uvicorn", "app.http_server:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--no-server-header"]
