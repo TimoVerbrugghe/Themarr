@@ -1,6 +1,6 @@
 FROM node:26-bookworm-slim AS node-runtime
 
-FROM python:3.14-slim-bookworm AS python-deps
+FROM python:3.15-slim-bookworm AS python-deps
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -14,7 +14,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-FROM python:3.14-slim-bookworm
+FROM python:3.15-slim-bookworm
 
 ENV PATH="/opt/venv/bin:$PATH" \
     HOME=/tmp \
