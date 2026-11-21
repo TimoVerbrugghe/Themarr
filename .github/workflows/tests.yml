@@ -12,6 +12,7 @@ permissions: {}
 
 jobs:
   test:
+    name: Unit tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,3 +35,62 @@ jobs:
 
       - name: Run tests
         run: python3 -m pytest tests/ -v
+
+  container-test:
+    name: Container build and runtime tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        run: docker build --tag themarr-ci .
+
+      - name: Run tests in the proposed runtime
+        run: |
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/src:ro" \
+            --workdir /src \
+            --entrypoint /bin/sh \
+            themarr-ci -ec '
+              python -m pip install --target /tmp/test-deps -r requirements-test.txt
+              PYTHONPATH=/tmp/test-deps:/src python -m pytest tests/ -v -p no:cacheprovider
+            '
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build supported platforms
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+
+  dependency-review:
+    name: Review dependency changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: ${{ github.event.pull_request.head.repo.full_name == github.repository && 'always' || 'never' }}
+          deny-packages: ''
+          allow-licenses: MIT, HPND, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, Python-2.0, LGPL-2.1-only, LGPL-3.0-only, Unlicense
